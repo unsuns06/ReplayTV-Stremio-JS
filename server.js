@@ -33,15 +33,28 @@ function loadDotenv() {
 
 loadDotenv();
 
-const host = process.env.HOST || '127.0.0.1';
 const port = parseInt(process.env.PORT || '7860', 10);
+
+/** Addresses to bind.
+ *
+ * `localhost` resolves to ::1 before 127.0.0.1 on Windows, so binding IPv4 only
+ * leaves http://localhost:7860 refused for anything that does not fall back —
+ * which is how both Stremio and the browser end up seeing a dead addon. Bind
+ * both loopback addresses unless HOST says otherwise (Docker sets 0.0.0.0).
+ */
+const hosts = process.env.HOST ? [process.env.HOST] : ['127.0.0.1', '::1'];
 
 startupDiagnostics();
 
 const app = createApp();
-app.listen(port, host, () => {
-  logger.info('🚀 Listening on http://%s:%d', host, port);
-  logger.info('   Add http://%s:%d/manifest.json as an addon in Stremio', host, port);
+let listening = 0;
+let started = false;
+
+/** Everything that should happen once, after the first successful bind. */
+function onFirstListen() {
+  if (started) return;
+  started = true;
+  logger.info('   Add http://localhost:%d/manifest.json as an addon in Stremio', port);
   // Log in to every provider now and keep the tokens fresh, so the first
   // viewer to press play does not wait out a login. Detached on purpose:
   // the server is already answering requests.
@@ -49,4 +62,27 @@ app.listen(port, host, () => {
   // The Python addon restarted itself when programs.json changed; re-reading
   // the file is enough, and keeps the server up.
   watchProgramsFile();
-});
+}
+
+for (const host of hosts) {
+  const server = app.listen(port, host);
+  server.on('listening', () => {
+    listening += 1;
+    logger.info('🚀 Listening on http://%s:%d', host.includes(':') ? `[${host}]` : host, port);
+    onFirstListen();
+  });
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      logger.error('❌ Port %d is already in use — is another copy of the addon (or the Python one) running?', port);
+      process.exit(1);
+    }
+    // A machine with no IPv6 stack simply cannot offer ::1; that is not fatal
+    // as long as the IPv4 bind worked.
+    if (['EADDRNOTAVAIL', 'EAFNOSUPPORT', 'EINVAL'].includes(err.code)) {
+      logger.debug('Skipping %s: %s', host, err.code);
+      return;
+    }
+    logger.error('❌ Could not listen on %s:%d — %s', host, port, err.message);
+    if (!listening) process.exit(1);
+  });
+}

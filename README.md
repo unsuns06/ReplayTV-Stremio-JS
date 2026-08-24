@@ -31,7 +31,14 @@ npm start                     # serves http://127.0.0.1:7860
 npm run dev                   # the same, restarting on file changes
 ```
 
-Then add `http://127.0.0.1:7860/manifest.json` as an addon in Stremio.
+Then add `http://localhost:7860/manifest.json` as an addon in Stremio (the
+**desktop** app — Stremio Web is served over HTTPS and browsers block it from
+loading an `http://` addon).
+
+The addon listens on both loopback stacks — `127.0.0.1` and `::1` — because
+`localhost` resolves to IPv6 first on Windows, so an IPv4-only bind leaves the
+manifest unreachable for anything that does not fall back. Set `HOST` to pin a
+single address (`HOST=0.0.0.0` to reach it from other devices on your network).
 
 Requires **Node.js 18 or newer** (it uses the built-in `fetch`). The only
 dependency is Express.
