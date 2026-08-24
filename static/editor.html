@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Catch-up TV &amp; More — Shows</title>
+<style>
+:root {
+  --bg: #f6f7f9;
+  --card: #fff;
+  --ink: #1c2024;
+  --muted: #6b7280;
+  --line: #e3e6ea;
+  --accent: #4f46e5;
+  --ok: #197b4b;
+  --warn: #9a6400;
+  --err: #b42318;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a; --card: #1c1f24; --ink: #e7e9ec; --muted: #9aa3ad;
+    --line: #2b3037; --accent: #8b85f5; --ok: #4ade80; --warn: #fbbf24; --err: #f87171;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+header {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
+  position: sticky; top: 0; z-index: 2;
+}
+.brand h1 { font-size: 1.05rem; margin: 0; letter-spacing: -.01em; }
+.brand p { margin: .1rem 0 0; font-size: .78rem; color: var(--muted); }
+h2 { font-size: .95rem; margin: 0 0 1rem; display: flex; align-items: center; gap: .5rem; }
+.actions { display: flex; align-items: center; gap: .75rem; }
+a.link { text-decoration: none; display: inline-block; font-size: .9rem; }
+
+main { max-width: 1000px; margin: 1.5rem auto; padding: 0 1.5rem; display: grid; gap: 1.5rem; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1.25rem; }
+
+.add-grid {
+  display: grid; gap: .85rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+.add-grid .wide { grid-column: 1 / -1; }
+label { display: grid; gap: .3rem; font-size: .8rem; color: var(--muted); }
+
+select, input {
+  width: 100%; padding: .5rem .6rem;
+  border: 1px solid var(--line); border-radius: 7px;
+  background: var(--bg); color: var(--ink);
+  font: inherit; font-size: .9rem;
+}
+select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+select:disabled, input:disabled { opacity: .5; }
+
+button {
+  padding: .5rem 1rem; border: 1px solid transparent; border-radius: 7px;
+  background: var(--accent); color: #fff; font: inherit; font-weight: 500; cursor: pointer;
+}
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+button.ghost.danger { color: var(--err); }
+button.ghost:hover:not(:disabled) { border-color: var(--accent); }
+
+.hint { margin: 1rem 0 0; font-size: .8rem; color: var(--muted); }
+code { font-family: ui-monospace, "Cascadia Code", monospace; font-size: .85em; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: .55rem .5rem; border-bottom: 1px solid var(--line); }
+th { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+tbody tr:last-child td { border-bottom: 0; }
+td:last-child { text-align: right; width: 1%; white-space: nowrap; }
+.extra { color: var(--muted); font-size: .82rem; }
+
+.tag, .pill {
+  display: inline-block; padding: .1rem .5rem; border-radius: 99px;
+  background: var(--bg); border: 1px solid var(--line);
+  font-size: .75rem; color: var(--muted);
+}
+
+#status { font-size: .82rem; color: var(--muted); }
+#status.ok { color: var(--ok); }
+#status.warn { color: var(--warn); }
+#status.err { color: var(--err); }
+
+@media (max-width: 640px) {
+  .add-grid { grid-template-columns: 1fr; }
+  .extra, th:nth-child(4) { display: none; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>Catch-up TV &amp; More</h1>
+    <p>Shows in <code>programs.json</code> — saving restarts the addon</p>
+  </div>
+  <div class="actions">
+    <span id="status"></span>
+    <a class="ghost link" href="/manifest.json">manifest</a>
+    <button id="reload" class="ghost">Reload</button>
+    <button id="save" disabled>Save</button>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Add a show</h2>
+    <div class="add-grid">
+      <label>Provider
+        <select id="provider">
+          <option value="">Choose…</option>
+          <option value="6play">6play</option>
+          <option value="mytf1">TF1+</option>
+          <option value="francetv">France TV</option>
+          <option value="cbc">CBC Gem</option>
+        </select>
+      </label>
+      <label>Filter
+        <input id="filter" type="search" placeholder="Type to narrow the list" disabled>
+      </label>
+      <label class="wide">Show
+        <select id="show" disabled><option value="">Pick a provider first</option></select>
+      </label>
+      <label>Name
+        <input id="name" placeholder="Display name">
+      </label>
+      <label>Slug
+        <input id="slug" placeholder="provider's own slug">
+      </label>
+      <button id="add" disabled>Add show</button>
+    </div>
+    <p class="hint" id="hint">Only <code>provider</code>, <code>slug</code> and <code>name</code> are
+      stored. Everything else — description, channel, genres, year, rating, artwork — the addon
+      fetches from the provider's API. The slug must be the provider's own, so pick from the list
+      rather than inventing one.</p>
+  </section>
+
+  <section class="card">
+    <h2>Shows <span id="count" class="pill">0</span></h2>
+    <table id="table">
+      <thead>
+        <tr><th>Provider</th><th>Name</th><th>Slug</th><th>Extra pins</th><th></th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const PROVIDERS = {"6play": "6play", mytf1: "TF1+", francetv: "France TV", cbc: "CBC Gem"};
+const CORE = ["provider", "slug", "name"];
+
+let shows = [];          // what will be written
+let catalogue = [];      // the selected provider's show list
+let dirty = false;
+
+const setStatus = (text, kind = "") => { $("status").textContent = text; $("status").className = kind; };
+const markDirty = () => { dirty = true; $("save").disabled = false; setStatus("Unsaved changes", "warn"); };
+
+/* ---------- current shows ---------- */
+
+function render() {
+  const body = $("table").tBodies[0];
+  body.innerHTML = "";
+  $("count").textContent = shows.length;
+  shows.forEach((show, i) => {
+    const extra = Object.keys(show).filter(k => !CORE.includes(k));
+    const row = body.insertRow();
+    row.innerHTML = `
+      <td><span class="tag">${PROVIDERS[show.provider] || show.provider}</span></td>
+      <td class="name"></td>
+      <td><code></code></td>
+      <td class="extra">${extra.length ? extra.join(", ") : "—"}</td>
+      <td><button class="ghost danger" data-i="${i}">Remove</button></td>`;
+    row.querySelector(".name").textContent = show.name;
+    row.querySelector("code").textContent = show.slug;
+  });
+  body.onclick = e => {
+    const button = e.target.closest("button[data-i]");
+    if (!button) return;
+    shows.splice(+button.dataset.i, 1);
+    render();
+    markDirty();
+  };
+}
+
+async function load() {
+  setStatus("Loading…");
+  const data = await (await fetch("/api/programs")).json();
+  shows = data.shows;
+  dirty = false;
+  $("save").disabled = true;
+  render();
+  setStatus(`${shows.length} shows loaded`, "ok");
+}
+
+/* ---------- provider catalogue ---------- */
+
+$("provider").onchange = async () => {
+  const provider = $("provider").value;
+  $("show").disabled = $("filter").disabled = true;
+  catalogue = [];
+  fillShows();
+  if (!provider) return;
+  setStatus(`Fetching the ${PROVIDERS[provider]} catalogue…`);
+  const response = await fetch(`/api/catalogue/${provider}`);
+  const data = await response.json();
+  if (!response.ok) return setStatus(data.error, "err");
+  catalogue = data;
+  $("show").disabled = $("filter").disabled = false;
+  fillShows();
+  setStatus(`${catalogue.length} shows available on ${PROVIDERS[provider]}`, "ok");
+};
+
+function fillShows() {
+  const needle = $("filter").value.trim().toLowerCase();
+  const taken = new Set(shows.filter(s => s.provider === $("provider").value).map(s => s.slug));
+  const matches = catalogue.filter(row =>
+    !needle || row.name.toLowerCase().includes(needle) || row.slug.includes(needle));
+  $("show").innerHTML = "";
+  $("show").append(new Option(matches.length ? "Choose a show…" : "No match", ""));
+  for (const row of matches) {
+    const label = [row.name, row.channel && `(${row.channel})`, taken.has(row.slug) && "— already added"]
+      .filter(Boolean).join(" ");
+    const option = new Option(label, row.slug);
+    option.disabled = taken.has(row.slug);
+    $("show").add(option);
+  }
+}
+
+$("filter").oninput = fillShows;
+
+/* slug and name auto-populate from the pick; both stay editable */
+$("show").onchange = () => {
+  const row = catalogue.find(r => r.slug === $("show").value);
+  $("slug").value = row ? row.slug : "";
+  $("name").value = row ? row.name : "";
+  checkAdd();
+};
+$("slug").oninput = $("name").oninput = checkAdd;
+
+function checkAdd() {
+  const provider = $("provider").value, slug = $("slug").value.trim(), name = $("name").value.trim();
+  const clash = shows.some(s => s.provider === provider && s.slug === slug);
+  $("add").disabled = !(provider && slug && name) || clash;
+  if (clash) setStatus(`${slug} is already in the list`, "warn");
+}
+
+$("add").onclick = () => {
+  shows.push({provider: $("provider").value, slug: $("slug").value.trim(), name: $("name").value.trim()});
+  $("show").value = $("slug").value = $("name").value = "";
+  fillShows();
+  checkAdd();
+  render();
+  markDirty();
+};
+
+/* ---------- save ---------- */
+
+$("save").onclick = async () => {
+  setStatus("Saving…");
+  const response = await fetch("/api/programs", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({shows}),
+  });
+  const data = await response.json();
+  if (!response.ok) return setStatus(data.error, "err");
+  dirty = false;
+  $("save").disabled = true;
+  setStatus(`Saved ${data.saved} shows`, "ok");
+};
+
+$("reload").onclick = () => {
+  if (!dirty || confirm("Discard unsaved changes?")) load();
+};
+
+addEventListener("beforeunload", e => { if (dirty) e.preventDefault(); });
+
+load();
+</script>
+</body>
+</html>

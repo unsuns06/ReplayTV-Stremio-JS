@@ -1,0 +1,26 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Env / logs
+.env
+*.log
+logs/
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Credentials
+#
+# Listed here as a reminder that this file holds live account passwords — but it
+# IS tracked in this repo, the same way it is in the Python project, because the
+# deployment reads it from the checkout. If this repo ever goes public, drop the
+# tracked copy (`git rm --cached credentials.json`) and feed the addon through
+# the CREDENTIALS_JSON environment variable instead.
+credentials.json
+credentials-test.json

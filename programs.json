@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "_comment": "provider/slug/name only. The slug is the one the provider's own API uses. Everything else (description, channel, genres, year, rating, artwork) is fetched from that API; add a field here to pin it and the API value is ignored.",
+  "shows": [
+    { "provider": "6play", "slug": "capital", "name": "Capital" },
+    { "provider": "6play", "slug": "66-minutes", "name": "66 minutes" },
+    { "provider": "6play", "slug": "66-minutes-grand-format", "name": "66 minutes Grand Format" },
+    { "provider": "6play", "slug": "zone-interdite", "name": "Zone Interdite" },
+    { "provider": "6play", "slug": "enquete-exclusive", "name": "Enquête Exclusive" },
+    { "provider": "mytf1", "slug": "sept-a-huit", "name": "Sept à huit" },
+    { "provider": "mytf1", "slug": "quotidien-avec-yann-barthes", "name": "Quotidien" },
+    { "provider": "francetv", "slug": "envoye-special", "name": "Envoyé spécial" },
+    { "provider": "francetv", "slug": "cash-investigation", "name": "Cash Investigation" },
+    { "provider": "francetv", "slug": "complement-d-enquete", "name": "Complément d'enquête" },
+    { "provider": "cbc", "slug": "dragons-den", "name": "Dragon's Den" },
+    { "provider": "6play", "slug": "un-jour-un-doc", "name": "Un jour, un doc" },
+    { "provider": "6play", "slug": "le-1245", "name": "Le 1245" },
+	{ "provider": "cbc", "slug": "about-that-with-andrew-chang", "name": "About That with Andrew Chang" },
+    { "provider": "cbc", "slug": "marketplace", "name": "Marketplace" },
+    { "provider": "cbc", "slug": "the-fifth-estate", "name": "The Fifth Estate" },
+    { "provider": "cbc", "slug": "the-great-canadian-baking-show", "name": "The Great Canadian Baking Show" }
+  ]
+}
