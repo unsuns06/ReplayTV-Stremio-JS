@@ -1,0 +1,13 @@
+# Keep line endings predictable across checkouts: the shows editor rewrites
+# programs.json in LF, so a CRLF checkout would show the whole file as changed
+# the first time anyone saves.
+* text=auto
+
+*.bat text eol=crlf
+programs.json text eol=lf
+credentials.json text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.wvd binary
