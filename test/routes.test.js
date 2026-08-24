@@ -4,7 +4,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import fs from 'node:fs';
+
 import { createApp } from '../src/app.js';
+import { getProgramsFilePath } from '../src/utils/programsLoader.js';
 
 let server;
 let base;
@@ -104,20 +107,17 @@ test('saving through the editor makes the change visible at once', async (t) => 
   // The Python addon restarted the server on every write to programs.json.
   // Without an equivalent, the parsed file (1h) and each catalogue (10min)
   // stayed cached and a save appeared to do nothing.
-  const original = await (await get('/api/programs')).text();
-  t.after(async () => {
-    await get('/api/programs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ shows: JSON.parse(original).shows }),
-    });
-  });
+  // Restore the file byte for byte: saving re-serialises it, which would
+  // otherwise leave the repo with a whitespace-only diff after every test run.
+  const programsPath = getProgramsFilePath();
+  const original = fs.readFileSync(programsPath);
+  t.after(() => fs.writeFileSync(programsPath, original));
 
   const before = await (await get('/manifest.json')).json();
   const cbcBefore = before.catalogs.find((c) => c.id === 'ca-cbc-dragons-den').name;
   assert.doesNotMatch(cbcBefore, /Editor Round Trip/);
 
-  const shows = [...JSON.parse(original).shows, {
+  const shows = [...JSON.parse(original.toString('utf-8')).shows, {
     provider: 'cbc', slug: 'editor-round-trip', name: 'Editor Round Trip',
   }];
   const saved = await get('/api/programs', {

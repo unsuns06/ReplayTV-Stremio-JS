@@ -15,7 +15,7 @@
     { "provider": "cbc", "slug": "dragons-den", "name": "Dragon's Den" },
     { "provider": "6play", "slug": "un-jour-un-doc", "name": "Un jour, un doc" },
     { "provider": "6play", "slug": "le-1245", "name": "Le 1245" },
-    { "provider": "cbc", "slug": "about-that-with-andrew-chang", "name": "About That with Andrew Chang" },
+	{ "provider": "cbc", "slug": "about-that-with-andrew-chang", "name": "About That with Andrew Chang" },
     { "provider": "cbc", "slug": "marketplace", "name": "Marketplace" },
     { "provider": "cbc", "slug": "the-fifth-estate", "name": "The Fifth Estate" },
     { "provider": "cbc", "slug": "the-great-canadian-baking-show", "name": "The Great Canadian Baking Show" }
