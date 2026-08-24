@@ -272,7 +272,7 @@ router.get('/api/programs', (req, res) => {
   return res.type('application/json; charset=utf-8').send(fs.readFileSync(PROGRAMS, 'utf-8'));
 });
 
-router.post('/api/programs', (req, res) => {
+router.post('/api/programs', express.json({ limit: '5mb' }), (req, res) => {
   if (!isLocal(req)) return res.status(403).json(FORBIDDEN);
   const data = JSON.parse(fs.readFileSync(PROGRAMS, 'utf-8'));
   try {

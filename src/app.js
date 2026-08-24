@@ -80,7 +80,11 @@ export function createApp() {
   app.set('trust proxy', true);
   app.disable('x-powered-by');
 
-  app.use(express.json({ limit: '5mb' }));
+  // No global body parser: the only route that reads a body is the editor's
+  // save, and parsing every request meant Hugging Face's liveness probe
+  // (POST /api/predict, with a non-JSON body) blew up in body-parser and was
+  // logged as an unhandled 500 every few seconds. Unrouted paths now 404
+  // quietly, as they should.
 
   // CORS — Stremio clients need permissive origins and working preflight.
   // Credentials must stay off while the origin is a wildcard.
@@ -217,6 +221,13 @@ export function createApp() {
 
   // Global error handler — the last word on unhandled failures
   app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
+    // A body we could not parse is the sender's problem, not a server fault:
+    // answer 400 and log one line rather than a stack trace.
+    if (err.type === 'entity.parse.failed' || err.type === 'entity.too.large') {
+      logger.warning('⚠️ Bad request body on %s %s: %s', req.method, req.originalUrl, err.message);
+      res.status(err.status || 400).json({ error: 'Invalid request body', message: err.message });
+      return;
+    }
     logger.exception('Unhandled exception in %s %s', req.method, req.originalUrl, err);
     res.status(500).json({
       error: 'Unhandled Exception',

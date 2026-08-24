@@ -145,3 +145,24 @@ test('a rejected save leaves programs.json untouched', async () => {
   assert.equal(res.status, 400);
   assert.equal(await (await get('/api/programs')).text(), before);
 });
+
+test("Hugging Face's liveness probe does not raise a server error", async () => {
+  // HF polls POST /api/predict with a non-JSON body. A global express.json()
+  // turned that into an unhandled 500 with a stack trace every few seconds.
+  const res = await get('/api/predict', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: 'not json',
+  });
+  assert.equal(res.status, 404, 'an unrouted path 404s quietly');
+});
+
+test('a malformed save body is a 400, not a 500', async () => {
+  const res = await get('/api/programs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{broken',
+  });
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).error, 'Invalid request body');
+});

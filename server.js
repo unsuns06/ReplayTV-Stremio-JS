@@ -54,7 +54,13 @@ let started = false;
 function onFirstListen() {
   if (started) return;
   started = true;
-  logger.info('   Add http://localhost:%d/manifest.json as an addon in Stremio', port);
+  // Behind a pinned HOST (a container) "localhost" would be the wrong advice:
+  // the useful URL there is whatever the host maps in front of this port.
+  if (process.env.HOST) {
+    logger.info('   Serving /manifest.json on port %d', port);
+  } else {
+    logger.info('   Add http://localhost:%d/manifest.json as an addon in Stremio', port);
+  }
   // Log in to every provider now and keep the tokens fresh, so the first
   // viewer to press play does not wait out a login. Detached on purpose:
   // the server is already answering requests.
