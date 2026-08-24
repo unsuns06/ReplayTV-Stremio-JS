@@ -15,7 +15,7 @@ import path from 'node:path';
 import express from 'express';
 
 import { getLogger } from '../utils/logger.js';
-import { getProgramsFilePath } from '../utils/programsLoader.js';
+import { getProgramsFilePath, reloadPrograms } from '../utils/programsLoader.js';
 import { STATIC_DIR } from '../utils/paths.js';
 import { withParams } from '../utils/apiClient.js';
 
@@ -283,6 +283,9 @@ router.post('/api/programs', (req, res) => {
   // The repo keeps programs.json in LF; dumpPrograms only ever emits \n, so
   // nothing here can rewrite the file as CRLF on Windows.
   fs.writeFileSync(PROGRAMS, dumpPrograms(data), 'utf-8');
+  // Without this the catalogues and the manifest keep serving the old list for
+  // up to an hour, and a save looks like it did nothing.
+  reloadPrograms();
   logger.info('✅ [Editor] Saved %d shows to programs.json', data.shows.length);
   return res.json({ saved: data.shows.length, path: PROGRAMS });
 });

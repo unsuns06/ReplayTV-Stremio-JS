@@ -53,8 +53,10 @@ Useful endpoints:
 
 `/` serves an editor for [`programs.json`](programs.json): pick a provider, pick
 a show from its live catalogue, and the slug fills itself in. Saving rewrites the
-file; the catalogue caches expire within ten minutes, or restart the server to
-see the change at once.
+file and the change is live immediately — the catalogues and the manifest are
+rebuilt on the next request, with no restart. The file is also watched, so an
+edit from anywhere else (a `git pull`, another checkout, your own editor) is
+picked up within a second.
 
 **It answers to the local machine only.** The routes write to disk, so from any
 other address `/` returns the plain API greeting and the editor's own endpoints

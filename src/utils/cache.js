@@ -54,6 +54,22 @@ export class InMemoryCache {
     this._cache.delete(key);
   }
 
+  /** Remove every key starting with *prefix*, returning how many went.
+   *
+   * Lets one change drop a whole family — every per-provider catalogue when
+   * programs.json is edited, say — without the caller knowing the keys.
+   */
+  deletePrefix(prefix) {
+    let removed = 0;
+    for (const key of [...this._cache.keys()]) {
+      if (key.startsWith(prefix)) {
+        this._cache.delete(key);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
+
   /** Remove every entry from the cache. */
   clear() {
     this._cache.clear();

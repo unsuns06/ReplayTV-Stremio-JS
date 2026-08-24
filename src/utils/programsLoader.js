@@ -67,8 +67,45 @@ export function getAllPrograms() {
   return (loadPrograms().shows || []).filter((show) => show.enabled ?? true);
 }
 
-/** Force reload of programs.json (clears the cache). */
+/** Force reload of programs.json, dropping everything derived from it.
+ *
+ * The parsed file is cached for an hour and each provider's catalogue for ten
+ * minutes, so clearing only the first would leave the catalogues — and the
+ * show lists in the manifest — stale after an edit. The Python addon got this
+ * for free by restarting the server whenever the file changed; this is the same
+ * effect without dropping in-flight requests.
+ */
 export function reloadPrograms() {
   cache.delete(CacheKeys.programsFile());
-  logger.info('🔄 [ProgramsLoader] Programs cache cleared');
+  const dropped = cache.deletePrefix('programs:');
+  logger.info('🔄 [ProgramsLoader] Programs cache cleared (%d catalogue(s) dropped)', dropped);
+}
+
+/** Re-read programs.json whenever it changes on disk. Returns a stop function.
+ *
+ * Covers the edits the save route cannot see for itself: a git pull, an editor
+ * running in another checkout, or the file being changed by hand.
+ */
+export function watchProgramsFile() {
+  const filePath = getProgramsFilePath();
+  let timer = null;
+  let watcher = null;
+  try {
+    watcher = fs.watch(filePath, () => {
+      // One save touches the file more than once; settle before re-reading.
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        logger.info('🔄 [ProgramsLoader] programs.json changed on disk');
+        reloadPrograms();
+      }, 250);
+    });
+    watcher.unref?.();
+  } catch (e) {
+    logger.warning('⚠️ [ProgramsLoader] Could not watch programs.json: %s', e.message);
+    return () => {};
+  }
+  return () => {
+    clearTimeout(timer);
+    watcher.close();
+  };
 }

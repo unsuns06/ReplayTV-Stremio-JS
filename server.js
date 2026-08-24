@@ -13,6 +13,7 @@ import path from 'node:path';
 import { createApp, startupDiagnostics, startBackgroundAuth } from './src/app.js';
 import { getLogger } from './src/utils/logger.js';
 import { PACKAGE_ROOT } from './src/utils/paths.js';
+import { watchProgramsFile } from './src/utils/programsLoader.js';
 
 const logger = getLogger('server');
 
@@ -45,4 +46,7 @@ app.listen(port, host, () => {
   // viewer to press play does not wait out a login. Detached on purpose:
   // the server is already answering requests.
   startBackgroundAuth();
+  // The Python addon restarted itself when programs.json changed; re-reading
+  // the file is enough, and keeps the server up.
+  watchProgramsFile();
 });

@@ -99,3 +99,49 @@ test('an unknown editor catalogue is a 404, not a crash', async () => {
   assert.equal(res.status, 404);
   assert.match((await res.json()).error, /unknown provider/);
 });
+
+test('saving through the editor makes the change visible at once', async (t) => {
+  // The Python addon restarted the server on every write to programs.json.
+  // Without an equivalent, the parsed file (1h) and each catalogue (10min)
+  // stayed cached and a save appeared to do nothing.
+  const original = await (await get('/api/programs')).text();
+  t.after(async () => {
+    await get('/api/programs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shows: JSON.parse(original).shows }),
+    });
+  });
+
+  const before = await (await get('/manifest.json')).json();
+  const cbcBefore = before.catalogs.find((c) => c.id === 'ca-cbc-dragons-den').name;
+  assert.doesNotMatch(cbcBefore, /Editor Round Trip/);
+
+  const shows = [...JSON.parse(original).shows, {
+    provider: 'cbc', slug: 'editor-round-trip', name: 'Editor Round Trip',
+  }];
+  const saved = await get('/api/programs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ shows }),
+  });
+  assert.equal(saved.status, 200);
+
+  const after = await (await get('/manifest.json')).json();
+  const cbcAfter = after.catalogs.find((c) => c.id === 'ca-cbc-dragons-den').name;
+  assert.match(cbcAfter, /Editor Round Trip/, 'the manifest lists the new show right away');
+
+  const reread = await (await get('/api/programs')).json();
+  assert.ok(reread.shows.some((s) => s.slug === 'editor-round-trip'));
+});
+
+test('a rejected save leaves programs.json untouched', async () => {
+  const before = await (await get('/api/programs')).text();
+  const res = await get('/api/programs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ shows: [{ provider: 'nope', slug: 'x', name: 'y' }] }),
+  });
+  assert.equal(res.status, 400);
+  assert.equal(await (await get('/api/programs')).text(), before);
+});
