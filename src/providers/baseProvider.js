@@ -110,6 +110,16 @@ export class BaseProvider {
     return `[${this.displayName}]`;
   }
 
+  /** Put a usable auth token in the shared cache, off the request path.
+   *
+   * Called by the auth warmer at startup and on a timer. Returns `true` when a
+   * token is ready, `false` when authentication was attempted and failed, and
+   * `null` when the provider needs no credentials at all.
+   */
+  async warmAuth() {
+    return null;
+  }
+
   close() {
     this.apiClient.close();
   }

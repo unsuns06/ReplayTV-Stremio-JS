@@ -9,6 +9,7 @@ import { STATIC_DIR, dataFile } from './utils/paths.js';
 import { runWithClientIp, resolveViewerIp } from './utils/clientIp.js';
 import { loadCredentials } from './utils/credentials.js';
 import { cache } from './utils/cache.js';
+import { startAuthWarmer } from './utils/authWarmer.js';
 import { getManifest } from './manifest.js';
 import { PROVIDER_REGISTRY } from './config/providerConfig.js';
 
@@ -59,6 +60,15 @@ export function startupDiagnostics() {
   } catch (e) {
     logger.error('❌ Startup diagnostics failed while loading credentials: %s', e.message);
   }
+}
+
+/** Start the background auth warm-up. Returns a stop function.
+ *
+ * Kept out of `createApp` so tests can build an app without touching the
+ * network; `server.js` calls it once the process is really serving.
+ */
+export function startBackgroundAuth() {
+  return startAuthWarmer();
 }
 
 export function createApp() {

@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { createApp, startupDiagnostics } from './src/app.js';
+import { createApp, startupDiagnostics, startBackgroundAuth } from './src/app.js';
 import { getLogger } from './src/utils/logger.js';
 import { PACKAGE_ROOT } from './src/utils/paths.js';
 
@@ -41,4 +41,8 @@ const app = createApp();
 app.listen(port, host, () => {
   logger.info('🚀 Listening on http://%s:%d', host, port);
   logger.info('   Add http://%s:%d/manifest.json as an addon in Stremio', host, port);
+  // Log in to every provider now and keep the tokens fresh, so the first
+  // viewer to press play does not wait out a login. Detached on purpose:
+  // the server is already answering requests.
+  startBackgroundAuth();
 });

@@ -83,6 +83,13 @@ export class SixPlayProvider extends withDrmProcessedFiles(BaseProvider) {
     this.shows = getProgramsForProvider('6play');
   }
 
+  /** Pre-authenticate so no viewer pays for the API-key scrape + Gigya login. */
+  async warmAuth() {
+    const creds = this.credentials || {};
+    if (!(creds.username || creds.login) || !creds.password) return null;
+    return this._authenticate();
+  }
+
   /** Authenticate the session for 6play using real Gigya authentication.
    *
    * Follows the Kodi plugin approach: Gigya login for a JWT that unlocks DRM
@@ -171,14 +178,21 @@ export class SixPlayProvider extends withDrmProcessedFiles(BaseProvider) {
   async getEpisodeStreamUrl(episodeId) {
     const actualEpisodeId = this._extractAfterMarker(episodeId);
     try {
-      const existing = (await this._checkProcessedFile(actualEpisodeId)) || [];
+      // The processed-file lookup, the login and the asset list are three
+      // independent round trips — the asset API is unauthenticated, so none of
+      // them has to wait for the others.
+      const [existingResult, authOk, videoAssets] = await Promise.all([
+        this._checkProcessedFile(actualEpisodeId),
+        this._authenticated ? true : this._authenticate(),
+        this._fetchVideoAssets(actualEpisodeId),
+      ]);
+      const existing = existingResult || [];
 
-      if (!this._authenticated && !(await this._authenticate())) {
+      if (!authOk) {
         logger.error('❌ [SixPlay] 6play authentication failed');
         return existing.length ? existing : null;
       }
 
-      const videoAssets = await this._fetchVideoAssets(actualEpisodeId);
       if (!videoAssets) return existing.length ? existing : null;
 
       const [url, fmt] = await this._selectBestAsset(videoAssets);
@@ -309,8 +323,13 @@ export class SixPlayProvider extends withDrmProcessedFiles(BaseProvider) {
 
   /** Orchestrate the MPD/DASH DRM flow: extract PSSH, acquire key, build streams. */
   async _handleMpdStream(videoUrl, episodeId, startProcessing = true) {
-    const [psshRecord, keyIdHex, stream] = await this._extractMpdDrmInfo(videoUrl);
-    const drmToken = await this._fetchDrmToken(episodeId);
+    // Reading the manifest and minting the upfront token are unrelated calls to
+    // different hosts; running them together saves a full round trip (~370ms)
+    // before the licence request that needs both can even start.
+    const [[psshRecord, keyIdHex, stream], drmToken] = await Promise.all([
+      this._extractMpdDrmInfo(videoUrl),
+      this._fetchDrmToken(episodeId),
+    ]);
 
     const decryptionKey = await this._cachedDecryptionKey(psshRecord, keyIdHex, drmToken);
     const streams = [];
@@ -483,11 +502,14 @@ export class SixPlayProvider extends withDrmProcessedFiles(BaseProvider) {
     let licenseHeaders = null;
     let keyParams = null;
     if (fmt === 'mpd') {
-      const drmToken = await this._fetchLiveDrmToken(liveKey);
+      // Same independent pair as the replay path: token and manifest together.
+      const [drmToken, [psshRecord, keyIdHex]] = await Promise.all([
+        this._fetchLiveDrmToken(liveKey),
+        this._extractMpdDrmInfo(url),
+      ]);
       if (drmToken) {
         licenseUrl = `${DRM_LICENSE_URL}?specConform=true`;
         licenseHeaders = { 'x-dt-auth-token': drmToken, 'User-Agent': DRM_UA };
-        const [psshRecord, keyIdHex] = await this._extractMpdDrmInfo(url);
         const key = await this._cachedDecryptionKey(psshRecord, keyIdHex, drmToken);
         if (key) {
           // MediaFlow decrypts the CENC segments itself with this pair.

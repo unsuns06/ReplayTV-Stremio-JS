@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { Cdm } from '../../widevine/cdm.js';
 import { Device } from '../../widevine/device.js';
 import { PSSH } from '../../widevine/pssh.js';
+import { extractDrmInfoFromMpd } from '../../utils/drm/psshExtractor.js';
+import { normalizeKeyId } from '../../utils/encoding.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -27,15 +29,24 @@ export class TF1DRMExtractor {
     this.headers = { ...DEFAULT_HEADERS };
   }
 
-  /** Extract PSSH from an MPD manifest. Returns base64-encoded PSSH or null. */
+  /** Read the manifest once, returning both its PSSH and its default_KID.
+   *
+   * The KID comes free from the body already being parsed here — fetching the
+   * manifest a second time just to learn which key to use (which is what the
+   * multi-key path used to do, through the geo proxy) is pure waste.
+   *
+   * @returns {Promise<{pssh: string|null, defaultKid: string|null}>}
+   */
   async extractPsshFromMpd(mpdUrl) {
     try {
       const response = await fetch(mpdUrl, {
         headers: this.headers,
         signal: AbortSignal.timeout(15_000),
       });
-      if (!response.ok) return null;
+      if (!response.ok) return { pssh: null, defaultKid: null };
       const content = await response.text();
+      const defaultKid = normalizeKeyId(extractDrmInfoFromMpd(content).key_id);
+      const found = (pssh) => ({ pssh, defaultKid });
 
       // Method 1: Widevine ContentProtection elements
       const cpRe = /<(?:[\w.-]+:)?ContentProtection\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?ContentProtection>)/gi;
@@ -45,9 +56,9 @@ export class TF1DRMExtractor {
         const scheme = (attrs.match(/schemeIdUri\s*=\s*"([^"]*)"/i)?.[1] || '').toLowerCase();
         if (scheme.includes('edef8ba9') || scheme.includes('widevine')) {
           const child = body.match(/<(?:[\w.-]+:)?pssh\b[^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?pssh>/i);
-          if (child && child[1].trim()) return child[1].trim();
+          if (child && child[1].trim()) return found(child[1].trim());
           const attrPssh = attrs.match(/(?:[\w.-]+:)?pssh\s*=\s*"([^"]+)"/i);
-          if (attrPssh) return attrPssh[1].trim();
+          if (attrPssh) return found(attrPssh[1].trim());
         }
       }
 
@@ -59,20 +70,20 @@ export class TF1DRMExtractor {
       ];
       for (const pattern of psshPatterns) {
         const match = content.match(pattern);
-        if (match) return match[1].trim();
+        if (match) return found(match[1].trim());
       }
 
       // Method 3: PSSH box format (starts with AAAA)
       const boxMatch = content.match(/(AAAA[A-Za-z0-9+/=]{40,})/);
-      if (boxMatch) return boxMatch[1];
+      if (boxMatch) return found(boxMatch[1]);
 
       // Method 4: base64 blob near "widevine" or "edef8ba9"
       const widevineSection = content.match(/(?:edef8ba9|widevine)[\s\S]{0,500}?([A-Za-z0-9+/=]{100,})/i);
-      if (widevineSection && widevineSection[1].startsWith('AAAA')) return widevineSection[1];
+      if (widevineSection && widevineSection[1].startsWith('AAAA')) return found(widevineSection[1]);
 
-      return null;
+      return { pssh: null, defaultKid };
     } catch {
-      return null;
+      return { pssh: null, defaultKid: null };
     }
   }
 
@@ -98,23 +109,30 @@ export class TF1DRMExtractor {
     return null;
   }
 
-  /** Extract DRM keys from a TF1+ video. Returns an object mapping KID to KEY. */
+  /**
+   * Extract DRM keys from a TF1+ video.
+   * @returns {Promise<{keys: Object, defaultKid: string|null}>} KID→KEY plus the
+   *   manifest's default_KID, so the caller never has to re-read the manifest.
+   */
   async getKeys({ videoUrl, licenseUrl }) {
     let cdm = null;
     let sessionId = null;
+    let defaultKid = null;
     try {
-      const psshB64 = await this.extractPsshFromMpd(videoUrl);
-      if (!psshB64) return {};
+      const manifest = await this.extractPsshFromMpd(videoUrl);
+      defaultKid = manifest.defaultKid;
+      const psshB64 = manifest.pssh;
+      if (!psshB64) return { keys: {}, defaultKid };
 
       let pssh;
       try {
         pssh = new PSSH(psshB64);
       } catch {
-        return {};
+        return { keys: {}, defaultKid };
       }
 
       const device = this.loadDevice();
-      if (!device) return {};
+      if (!device) return { keys: {}, defaultKid };
 
       cdm = Cdm.fromDevice(device);
       sessionId = cdm.open();
@@ -130,7 +148,7 @@ export class TF1DRMExtractor {
         body: challenge,
         signal: AbortSignal.timeout(20_000),
       });
-      if (response.status !== 200) return {};
+      if (response.status !== 200) return { keys: {}, defaultKid };
 
       cdm.parseLicense(sessionId, Buffer.from(await response.arrayBuffer()));
 
@@ -138,9 +156,9 @@ export class TF1DRMExtractor {
       for (const key of cdm.getKeys(sessionId, 'CONTENT')) {
         keys[key.kid.replace(/-/g, '')] = key.key.toString('hex');
       }
-      return keys;
+      return { keys, defaultKid };
     } catch {
-      return {};
+      return { keys: {}, defaultKid };
     } finally {
       if (cdm && sessionId) {
         try {

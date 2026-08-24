@@ -154,6 +154,34 @@ utils/     apiClient (retrying fetch + cookie jar), cache + cacheKeys,
 widevine/  a Widevine CDM: wvd device, protobuf, AES-CMAC key derivation
 ```
 
+### Keeping playback fast
+
+Two things dominate the time between pressing play and a stream URL coming back,
+and both are handled off the request path:
+
+- **Auth is pre-cached.** `src/utils/authWarmer.js` logs into every provider at
+  startup and re-logs-in every 4 minutes — inside the 5-minute buffer the token
+  cache already applies to each JWT's `exp`, so a request never finds an empty
+  cache. Logging in costs ~1-3s per provider (MyTF1 and 6play are three serial
+  round trips each, CBC's ROPC grant alone is ~2s); a viewer now pays none of it.
+  Verified end to end: after the startup sweep, repeated stream resolutions across
+  all four providers issue **zero** further auth requests.
+- **Independent calls run together.** Within one stream resolution the
+  pre-processed-file lookup, the login and the asset list are unrelated, as are
+  the manifest read and the DRM upfront token; each pair now runs concurrently.
+  The season/channel probes (CBC seasons 1-10, France TV's five channels, TF1's
+  five programme lists) try the usual answer alone first and only fan out on a
+  miss, so the common case still costs one request and the rare case costs one
+  round trip instead of up to nine.
+
+Measured against the same code before these changes, first play after startup:
+
+| | before | after | upstream calls |
+|---|---|---|---|
+| MyTF1 replay | 6055 ms | 931 ms | 6 → 3 |
+| 6play replay | 4635 ms | 1822 ms | 9 → 6 |
+| CBC replay | 3316 ms | 87 ms | 5 → 2 |
+
 Key conventions:
 
 - **Composite IDs**: `cutam:{country}:{provider}:{slug}[ :episode:{id} ]` —

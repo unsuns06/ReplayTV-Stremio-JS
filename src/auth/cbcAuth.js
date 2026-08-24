@@ -3,7 +3,7 @@
  * Based on the yt-dlp CBC extractor implementation.
  */
 import { getLogger } from '../utils/logger.js';
-import { decodeJwt } from '../utils/authCache.js';
+import { decodeJwt, ttlFromJwt } from '../utils/authCache.js';
 import { formEncode } from '../utils/apiClient.js';
 
 const logger = getLogger('auth.cbc');
@@ -46,6 +46,25 @@ export class CBCAuthenticator {
 
     // ROPC settings cache
     this._ropcSettings = null;
+
+    // Provider instances are per-request, so a fresh authenticator starts blank
+    // unless it picks the shared cache up here — without this every request
+    // reported itself unauthenticated before falling into login().
+    this._loadCachedTokens();
+  }
+
+  /** Cache a token for as long as it is actually valid.
+   *
+   * The shared cache defaults to a 60-second TTL, which silently threw away
+   * hour-long CBC tokens and made every stream request more than a minute apart
+   * pay a fresh ~2.8s ROPC login. The JWT's own `exp` decides instead.
+   */
+  _cacheToken(key, token) {
+    if (!token) {
+      this._cache.delete(key);
+      return;
+    }
+    this._cache.set(key, token, ttlFromJwt(token));
   }
 
   /** Get ROPC settings from the CBC API. */
@@ -116,8 +135,8 @@ export class CBCAuthenticator {
     this.refreshToken = tokenData.refresh_token ?? null;
     this.accessToken = tokenData.access_token ?? null;
 
-    this._cache.set('cbc_refresh_token', this.refreshToken);
-    this._cache.set('cbc_access_token', this.accessToken);
+    this._cacheToken('cbc_refresh_token', this.refreshToken);
+    this._cacheToken('cbc_access_token', this.accessToken);
 
     logger.info('Successfully %s', note.toLowerCase());
     return tokenData;
@@ -212,7 +231,7 @@ export class CBCAuthenticator {
         return null;
       }
 
-      this._cache.set('cbc_claims_token', this.claimsToken);
+      this._cacheToken('cbc_claims_token', this.claimsToken);
 
       logger.info('Successfully fetched claims token');
       logger.info('Claims token (truncated): %s...', this.claimsToken.slice(0, 20));

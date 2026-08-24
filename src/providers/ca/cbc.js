@@ -83,6 +83,20 @@ export class CBCProvider extends BaseProvider {
       success ? AUTH_SUCCESS_TTL : AUTH_FAILURE_TTL);
   }
 
+  /** Pre-authenticate so no viewer pays for the ~2.8s ROPC login.
+   *
+   * The claims token is fetched here too, not just the access token: it is a
+   * separate round trip that the media API insists on, so warming only the
+   * login would still leave one request's worth of latency on the first play.
+   */
+  async warmAuth() {
+    const creds = this.credentials || {};
+    if (!creds.login || !creds.password) return null;
+    await this._authenticateIfNeeded();
+    if (!(await this.authenticator.isAuthenticated())) return false;
+    return Boolean(await this.authenticator.getClaimsToken());
+  }
+
   /** Authenticate with CBC if credentials are available, using caching. */
   async _authenticateIfNeeded() {
     try {
@@ -114,21 +128,38 @@ export class CBCProvider extends BaseProvider {
     }
   }
 
-  /** The show payload — sXXe01 returns ALL seasons in the lineups array. */
+  /** The show payload — sXXe01 returns ALL seasons in the lineups array.
+   *
+   * Season 1 is asked for on its own first, because it answers for almost every
+   * show and that keeps the common case at one request. Only when it 404s do
+   * the remaining seasons go out together, turning what used to be up to nine
+   * serial round trips for an aged-out show into one.
+   */
   async _showPayload(showSlug) {
-    for (let season = 1; season <= CBCProvider.MAX_SEASON_PROBE; season += 1) {
+    const probe = (season) => {
       const url = `${this.catalogApi}/show/${showSlug}/s${String(season).padStart(2, '0')}e01?device=web&tier=Member`;
       logger.debug('🔍 [CBC] API request: %s', url);
-      const data = await this.apiClient.get(url, {
+      return this.apiClient.get(url, {
         headers: this._getHeadersWithViewerIp({
           Accept: 'application/json, text/plain, */*',
           Referer: 'https://gem.cbc.ca/',
           Origin: 'https://gem.cbc.ca',
         }),
       });
-      if (data) {
-        if (season > 1) logger.info('ℹ️ [CBC] %s has no season 1; used season %d', showSlug, season);
-        return data;
+    };
+
+    const first = await probe(1);
+    if (first) return first;
+
+    const rest = [];
+    for (let season = 2; season <= CBCProvider.MAX_SEASON_PROBE; season += 1) rest.push(season);
+    const results = await Promise.all(rest.map(probe));
+    // The lowest season still wins, so the answer never depends on which reply
+    // happened to land first.
+    for (let i = 0; i < results.length; i += 1) {
+      if (results[i]) {
+        logger.info('ℹ️ [CBC] %s has no season 1; used season %d', showSlug, rest[i]);
+        return results[i];
       }
     }
     return null;

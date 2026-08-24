@@ -88,11 +88,19 @@ export class FranceTVProvider extends BaseProvider {
     let apiId = cache.get(key);
     if (apiId === null) {
       apiId = '';
-      for (const [channel] of CHANNELS) {
-        if (await this._taxonomy(`${channel}_${slug}`)) {
-          apiId = `${channel}_${slug}`;
-          break;
-        }
+      // France 2 alone first — it answers for most shows, and the taxonomy it
+      // returns is the one the caller wants anyway. The other four only go out
+      // together when it misses, so a franceinfo show costs two round trips
+      // instead of five.
+      const [firstChannel] = CHANNELS[0];
+      if (await this._taxonomy(`${firstChannel}_${slug}`)) {
+        apiId = `${firstChannel}_${slug}`;
+      } else {
+        const rest = CHANNELS.slice(1).map(([channel]) => channel);
+        const hits = await Promise.all(rest.map((channel) => this._taxonomy(`${channel}_${slug}`)));
+        // Channel order still decides, not response order.
+        const index = hits.findIndex(Boolean);
+        if (index !== -1) apiId = `${rest[index]}_${slug}`;
       }
       cache.set(key, apiId, CacheTTL.PROGRAMS);
     }

@@ -2,8 +2,12 @@ import { networkInterfaces } from 'node:os';
 
 import { getLogger } from '../utils/logger.js';
 import { formEncode } from '../utils/apiClient.js';
+import { cache } from '../utils/cache.js';
 
 const logger = getLogger('auth.sixplay');
+
+const API_KEY_CACHE_KEY = 'sixplay:gigya_api_key';
+const API_KEY_TTL = 3600; // 1 hour
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
 
@@ -44,8 +48,23 @@ export class SixPlayAuth {
     this.patternJsId = /main-(.*?)\.bundle\.js/;
   }
 
-  /** Get the current API key from the 6play website. */
+  /** Get the current API key from the 6play website.
+   *
+   * Cached: the scrape is two page loads, and www.6play.fr/connexion currently
+   * answers 500 (~0.8s) before the default key gets used anyway. The key rotates
+   * rarely, so an hour of reuse costs nothing and a rotation is still picked up
+   * on the next warm sweep.
+   */
   async _getApiKey() {
+    const cached = cache.get(API_KEY_CACHE_KEY);
+    if (cached) return cached;
+    const key = await this._scrapeApiKey();
+    // The fallback is cached too — a page 500ing now will still 500 in a minute.
+    cache.set(API_KEY_CACHE_KEY, key, API_KEY_TTL);
+    return key;
+  }
+
+  async _scrapeApiKey() {
     try {
       const headers = { 'User-Agent': UA };
 

@@ -68,6 +68,12 @@ export class MyTF1Provider extends withDrmProcessedFiles(BaseProvider) {
     return true;
   }
 
+  /** Pre-authenticate so no viewer pays for the 3-round-trip Gigya login. */
+  async warmAuth() {
+    if (!this.credentials.login || !this.credentials.password) return null;
+    return this._authenticate();
+  }
+
   constructor(req = null) {
     super(req);
 
@@ -281,12 +287,27 @@ export class MyTF1Provider extends withDrmProcessedFiles(BaseProvider) {
       'content-type': 'application/json',
       referer: 'https://www.tf1.fr/programmes-tv',
     };
-    for (const channel of MyTF1Provider.PROGRAM_LIST_FILTERS) {
-      const programs = await this._getGraphqlProgramsList(requestHeaders, channel);
-      for (const program of programs || []) {
-        if (program.slug === slug || (program.name || '').toLowerCase() === showName) return program;
-      }
+    const match = (programs) => (programs || []).find(
+      (program) => program.slug === slug || (program.name || '').toLowerCase() === showName,
+    );
+
+    // The unfiltered list (TF1's 500 most prominent programmes) is tried alone
+    // first and usually hits. Only a miss fans out to the four channel lists —
+    // 500-item GraphQL pages, worth four parallel requests to avoid rather than
+    // four serial ones to endure.
+    const [firstFilter, ...restFilters] = MyTF1Provider.PROGRAM_LIST_FILTERS;
+    const firstHit = match(await this._getGraphqlProgramsList(requestHeaders, firstFilter));
+    if (firstHit) return firstHit;
+
+    const lists = await Promise.all(
+      restFilters.map((channel) => this._getGraphqlProgramsList(requestHeaders, channel)),
+    );
+    // Filter order still decides which entry wins, not which reply arrived first.
+    for (const programs of lists) {
+      const hit = match(programs);
+      if (hit) return hit;
     }
+
     logger.error('❌ [MyTF1] Program not found for show: %s', slug);
     return null;
   }
@@ -468,43 +489,50 @@ export class MyTF1Provider extends withDrmProcessedFiles(BaseProvider) {
     return this._fetchMediainfo(episodeId, MyTF1Provider.REPLAY_MEDIAINFO_PARAMS);
   }
 
-  /** Extract DRM keys with the local Widevine CDM. Returns {kid: key}. */
+  /** Extract DRM keys with the local Widevine CDM.
+   * @returns {Promise<{keys: Object, defaultKid: string|null}>}
+   */
   async _extractDrmKeys(videoUrl, licenseUrl) {
     try {
       const { TF1DRMExtractor } = await import('./tf1DrmKeyExtractor.js');
       logger.debug('✅ [MyTF1] Extracting DRM keys for TF1 replay...');
 
       const extractor = new TF1DRMExtractor();
-      const drmKeys = await extractor.getKeys({ videoUrl, licenseUrl });
+      const { keys, defaultKid } = await extractor.getKeys({ videoUrl, licenseUrl });
 
-      if (Object.keys(drmKeys).length) {
-        logger.debug('✅ [MyTF1] Extracted %d DRM key(s)', Object.keys(drmKeys).length);
-        for (const [kid, key] of Object.entries(drmKeys)) {
+      if (Object.keys(keys).length) {
+        logger.debug('✅ [MyTF1] Extracted %d DRM key(s)', Object.keys(keys).length);
+        for (const [kid, key] of Object.entries(keys)) {
           logger.debug('   KID: %s -> KEY: %s', kid, key);
         }
       } else {
         logger.warning('⚠️ [MyTF1] No DRM keys extracted');
       }
-      return drmKeys;
+      return { keys, defaultKid };
     } catch (drmError) {
       logger.error('⚠️ [MyTF1] DRM key extraction failed: %s', drmError.message);
-      return {};
+      return { keys: {}, defaultKid: null };
     }
   }
 
   /** Pick the single `key_id`/`key` pair MediaFlow decrypts with.
    *
    * MediaFlow takes one pair, a license can carry several. With one key there
-   * is nothing to choose; with several, the manifest's `default_KID` decides
-   * (one extra manifest fetch, only in that case).
+   * is nothing to choose; with several, the manifest's `default_KID` decides —
+   * and that arrives with the keys now, read from the manifest the CDM already
+   * fetched, so the multi-key case costs no extra request. Re-reading it is
+   * only a fallback for a manifest that published no default_KID.
    */
-  async _selectDrmKey(videoUrl, drmKeys) {
+  async _selectDrmKey(videoUrl, drmKeys, manifestKid = null) {
     const kids = Object.keys(drmKeys || {});
     if (!kids.length) return null;
     let kid = kids[0];
     if (kids.length > 1) {
-      const [, , drmInfo] = await extractPsshFromMpd(videoUrl, 'MyTF1');
-      const defaultKid = normalizeKeyId((drmInfo || {}).key_id);
+      let defaultKid = manifestKid;
+      if (!defaultKid) {
+        const [, , drmInfo] = await extractPsshFromMpd(videoUrl, 'MyTF1');
+        defaultKid = normalizeKeyId((drmInfo || {}).key_id);
+      }
       if (defaultKid && kids.includes(defaultKid)) {
         kid = defaultKid;
       } else {
@@ -520,8 +548,8 @@ export class MyTF1Provider extends withDrmProcessedFiles(BaseProvider) {
    * With a locally extracted Widevine key MediaFlow decrypts the CENC segments
    * itself; without one it is pointed at the TF1 license proxy.
    */
-  async _buildDirectStream(videoUrl, licenseUrl, licenseHeaders, headers, drmKeys, manifestType = 'mpd') {
-    const keyParams = await this._selectDrmKey(videoUrl, drmKeys);
+  async _buildDirectStream(videoUrl, licenseUrl, licenseHeaders, headers, drmKeys, manifestType = 'mpd', manifestKid = null) {
+    const keyParams = await this._selectDrmKey(videoUrl, drmKeys, manifestKid);
     if (keyParams) {
       logger.debug('✅ [MyTF1] Direct stream decrypted by MediaFlow (KID %s)', keyParams.key_id);
       licenseUrl = null;
@@ -571,11 +599,15 @@ export class MyTF1Provider extends withDrmProcessedFiles(BaseProvider) {
     const actualId = this._extractAfterMarker(episodeId);
 
     try {
-      const existing = (await this._checkProcessedFile(actualId)) || [];
+      // The pre-processed-file lookup talks to TorBox/Real-Debrid and the login
+      // talks to TF1 — nothing links them, so they run together.
+      const [existingResult, authOk] = await Promise.all([
+        this._checkProcessedFile(actualId),
+        this._authenticated ? true : this._authenticate(),
+      ]);
+      const existing = existingResult || [];
 
-      if (!this._authenticated && !(await this._authenticate())) {
-        return existing.length ? existing : null;
-      }
+      if (!authOk) return existing.length ? existing : null;
 
       const deliveryData = await this._fetchEpisodeDelivery(actualId);
       if (!deliveryData || (deliveryData.delivery?.code ?? 500) > 400) {
@@ -588,9 +620,9 @@ export class MyTF1Provider extends withDrmProcessedFiles(BaseProvider) {
       const manifestType = this._detectManifestType(videoUrl);
 
       if (manifestType === 'mpd' && licenseUrl) {
-        const drmKeys = await this._extractDrmKeys(videoUrl, licenseUrl);
+        const { keys: drmKeys, defaultKid } = await this._extractDrmKeys(videoUrl, licenseUrl);
         const streams = [await this._buildDirectStream(
-          videoUrl, licenseUrl, licenseHeaders, headers, drmKeys, manifestType,
+          videoUrl, licenseUrl, licenseHeaders, headers, drmKeys, manifestType, defaultKid,
         )];
         // Don't re-download something that is already processed.
         if (Object.keys(drmKeys).length && !existing.length) {
