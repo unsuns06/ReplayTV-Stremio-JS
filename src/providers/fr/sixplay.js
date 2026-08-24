@@ -14,6 +14,8 @@ import { getLogoUrl } from '../../utils/baseUrl.js';
 import { cache } from '../../utils/cache.js';
 import { CacheKeys, CacheTTL } from '../../utils/cacheKeys.js';
 import { BaseProvider, safeProviderCall } from '../baseProvider.js';
+import { getBaseUrl } from '../../utils/baseUrl.js';
+import { describeTracks } from '../../utils/subtitles/index.js';
 import { withDrmProcessedFiles } from '../drmMixin.js';
 import { htmlUnescape } from './metadata.js';
 import { Cdm } from '../../widevine/cdm.js';
@@ -285,10 +287,14 @@ export class SixPlayProvider extends withDrmProcessedFiles(BaseProvider) {
   // Background DRM processing + placeholder streams come from the DRM mixin.
 
   /** Extract PSSH and key ID from an MPD manifest.
-   * @returns {Promise<[PsshRecord|null, string|null, Object]>}
+   *
+   * The manifest text comes back too: it is already fetched here, and the
+   * subtitle tracks live in the same document, so reading them costs nothing.
+   *
+   * @returns {Promise<[PsshRecord|null, string|null, Object, string|null]>}
    */
   async _extractMpdDrmInfo(videoUrl) {
-    const [psshRecord, , drmInfo] = await extractPsshFromMpd(videoUrl, 'SixPlay');
+    const [psshRecord, mpdText, drmInfo] = await extractPsshFromMpd(videoUrl, 'SixPlay');
     const keyIdHex = normalizeKeyId((drmInfo || {}).key_id);
     if (keyIdHex) logger.debug('[SixPlay] MPD default_KID: %s', keyIdHex);
 
@@ -302,7 +308,7 @@ export class SixPlayProvider extends withDrmProcessedFiles(BaseProvider) {
     } else {
       logger.warning('[SixPlay] No PSSH found in MPD manifest');
     }
-    return [psshRecord, keyIdHex, stream];
+    return [psshRecord, keyIdHex, stream, mpdText];
   }
 
   /** Extract and normalize a Widevine decryption key. */
@@ -326,15 +332,20 @@ export class SixPlayProvider extends withDrmProcessedFiles(BaseProvider) {
     // Reading the manifest and minting the upfront token are unrelated calls to
     // different hosts; running them together saves a full round trip (~370ms)
     // before the licence request that needs both can even start.
-    const [[psshRecord, keyIdHex, stream], drmToken] = await Promise.all([
+    const [[psshRecord, keyIdHex, stream, mpdText], drmToken] = await Promise.all([
       this._extractMpdDrmInfo(videoUrl),
       this._fetchDrmToken(episodeId),
     ]);
+    const subtitles = this._subtitlesFor(episodeId, videoUrl, mpdText);
 
     const decryptionKey = await this._cachedDecryptionKey(psshRecord, keyIdHex, drmToken);
     const streams = [];
     const direct = this._buildDirectStream(videoUrl, 'mpd', keyIdHex, decryptionKey, drmToken);
     if (direct) streams.push(direct);
+    if (subtitles.length) {
+      for (const s of streams) s.subtitles = subtitles;
+      stream.subtitles = subtitles;
+    }
 
     if (decryptionKey) {
       stream.decryption_key = decryptionKey;
@@ -501,12 +512,14 @@ export class SixPlayProvider extends withDrmProcessedFiles(BaseProvider) {
     let licenseUrl = null;
     let licenseHeaders = null;
     let keyParams = null;
+    let subtitles = [];
     if (fmt === 'mpd') {
       // Same independent pair as the replay path: token and manifest together.
-      const [drmToken, [psshRecord, keyIdHex]] = await Promise.all([
+      const [drmToken, [psshRecord, keyIdHex, , mpdText]] = await Promise.all([
         this._fetchLiveDrmToken(liveKey),
         this._extractMpdDrmInfo(url),
       ]);
+      subtitles = this._subtitlesFor(liveKey, url, mpdText);
       if (drmToken) {
         licenseUrl = `${DRM_LICENSE_URL}?specConform=true`;
         licenseHeaders = { 'x-dt-auth-token': drmToken, 'User-Agent': DRM_UA };
@@ -537,7 +550,66 @@ export class SixPlayProvider extends withDrmProcessedFiles(BaseProvider) {
       stream.licenseUrl = licenseUrl;
       stream.licenseHeaders = licenseHeaders;
     }
+    if (subtitles.length) stream.subtitles = subtitles;
     return stream;
+  }
+
+  /** Subtitle entries for a stream, read out of the manifest already fetched.
+   *
+   * 6play stopped publishing the sidecar `subtitle_vtt` asset that older
+   * clients looked for; the subtitles are now a segmented TTML track inside the
+   * same MPD. Nothing is downloaded here — the manifest is remembered and the
+   * track is only turned into a WebVTT file if a player actually asks for it,
+   * so advertising subtitles costs a stream request nothing.
+   */
+  _subtitlesFor(contentId, manifestUrl, mpdText) {
+    if (!mpdText) return [];
+    let tracks;
+    try {
+      tracks = describeTracks(mpdText, manifestUrl);
+    } catch (e) {
+      logger.warning('⚠️ [SixPlay] Could not read subtitle tracks: %s', e.message);
+      return [];
+    }
+    if (!tracks.length) return [];
+
+    // The subtitle route re-reads the manifest from here rather than resolving
+    // the whole stream again.
+    cache.set(
+      CacheKeys.providerResource(this.providerName, `subs_manifest:${contentId}`),
+      { manifestUrl, mpdText },
+      CacheTTL.STREAM,
+    );
+
+    const base = getBaseUrl(this.req);
+    const seen = new Set();
+    const entries = [];
+    for (const track of tracks) {
+      const key = `${track.lang}${track.hearingImpaired ? '-sdh' : ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entries.push({
+        id: `6play-${key}`,
+        lang: track.lang,
+        url: `${base}/subtitles/6play/${encodeURIComponent(contentId)}/${key}.vtt`,
+      });
+    }
+    logger.debug('✅ [SixPlay] %d subtitle track(s) for %s', entries.length, contentId);
+    return entries;
+  }
+
+  /** The manifest a subtitle request needs, from cache or by re-resolving. */
+  async subtitleManifest(contentId) {
+    const cacheKey = CacheKeys.providerResource(this.providerName, `subs_manifest:${contentId}`);
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+
+    // Cold (a restart, or a link kept from an earlier session): resolve the
+    // stream again, which repopulates the entry above as a side effect.
+    const live = SixPlayProvider.LIVE_CHANNELS.find((c) => c[2] === contentId);
+    if (live) await this.getChannelStreamUrl(`${this.idPrefix}:${live[0]}`);
+    else await this.getEpisodeStreamUrl(`${this.idPrefix}:episode:${contentId}`);
+    return cache.get(cacheKey);
   }
 
   /** Pick the best [url, format] from an asset list, or [null, null]. */

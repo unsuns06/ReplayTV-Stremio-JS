@@ -30,7 +30,7 @@ function buildStreamFromInfo(info, includeIpHeaders = true) {
   // inject the wrong headers, killing playback. Add proxyHeaders back (gated on a
   // per-stream "raw url" flag) only if a provider ever returns an un-proxied URL.
 
-  return {
+  const built = {
     url: info.url,
     title: info.title ?? `${(info.manifest_type || 'stream').toUpperCase()} Stream`,
     behaviorHints: null,
@@ -40,6 +40,10 @@ function buildStreamFromInfo(info, includeIpHeaders = true) {
     licenseHeaders: mergedLicenseHeaders,
     externalUrl: info.externalUrl ?? null,
   };
+  // Only set when the provider actually found a subtitle track, so responses
+  // without subtitles stay exactly as they were.
+  if (info.subtitles?.length) built.subtitles = info.subtitles;
+  return built;
 }
 
 /** Build a stream response from provider stream info (always a list). */

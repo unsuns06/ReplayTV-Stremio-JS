@@ -154,6 +154,29 @@ utils/     apiClient (retrying fetch + cookie jar), cache + cacheKeys,
 widevine/  a Widevine CDM: wvd device, protobuf, AES-CMAC key derivation
 ```
 
+### Subtitles (6play)
+
+6play replays and live channels are served with French subtitles, including the
+hard-of-hearing (SDH) track. Stremio gets them as a `subtitles` entry on the
+stream, pointing at `/subtitles/6play/{id}/{lang}.vtt` on this server.
+
+The subtitles are *not* the sidecar `subtitle_vtt` asset older clients looked
+for — 6play no longer publishes one. They are a segmented TTML track inside the
+same DASH manifest the video comes from, which MediaFlow drops when it converts
+DASH to HLS. So `src/utils/subtitles/` reads the text `AdaptationSet` out of the
+manifest already fetched for the DRM key (no extra request), and the route
+fetches its TTML fragments, unwraps each `mdat`, and concatenates the cues into
+one WebVTT file.
+
+Nothing is downloaded while resolving a stream: the file is built on the first
+request for it (a 92-minute episode is ~90 fragments, about 2s, 8 at a time)
+and cached, so pressing play stays as fast as it was.
+
+**Live is best-effort.** A live manifest only carries a rolling window, so the
+generated file covers the last few minutes and is timed from the start of that
+window rather than the player's clock — expect drift, and expect the plain
+(non-SDH) track to be empty while French-language programming is on air.
+
 ### Keeping playback fast
 
 Two things dominate the time between pressing play and a stream URL coming back,

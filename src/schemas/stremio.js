@@ -48,11 +48,21 @@ const STREAM_FIELDS = [
   'behaviorHints', 'headers', 'externalUrl', 'manifest_type', 'licenseUrl', 'licenseHeaders',
 ];
 
+// Only streams that actually have subtitles carry the key, so every other
+// provider's response stays byte-identical to the Python addon's.
+const OPTIONAL_STREAM_FIELDS = ['subtitles'];
+
 const NUMERIC = { year: toInt, runtime: toInt, season: toInt, episode: toInt, rating: toStr };
 
 export const metaPreview = (data) => project(META_PREVIEW_FIELDS, data, NUMERIC);
 export const metaDetail = (data) => project(META_DETAIL_FIELDS, data, NUMERIC);
-export const stream = (data) => project(STREAM_FIELDS, data);
+export const stream = (data) => {
+  const out = project(STREAM_FIELDS, data);
+  for (const field of OPTIONAL_STREAM_FIELDS) {
+    if (data?.[field] !== undefined && data[field] !== null) out[field] = data[field];
+  }
+  return out;
+};
 
 export const catalogResponse = (metas) => ({ metas: (metas || []).map(metaPreview) });
 /** `null` meta means "not found" — Stremio treats it as an empty result. */
