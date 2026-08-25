@@ -17,9 +17,6 @@ import net from 'node:net';
 
 const ipStore = new AsyncLocalStorage();
 
-// Fallback holder for code paths not wrapped in a store (tests, scripts).
-let fallbackIp = null;
-
 // Single-value forwarding headers, in trust order
 const SINGLE_IP_HEADERS = ['cf-connecting-ip', 'true-client-ip', 'x-real-ip'];
 
@@ -177,24 +174,29 @@ export function getPublicClientIp(requestHeaders = null) {
   return null;
 }
 
-/** Run *fn* with *ip* as the current request context's viewer IP. */
+/** Run *fn* with *ip* as the viewer IP for everything it awaits.
+ *
+ * Pass null to run with no viewer at all — which is what background work must
+ * do. There is deliberately no process-wide fallback: one used to exist "for
+ * code paths not wrapped in a store", and because it was written on every
+ * request it outlived them, so the auth warm-up timer (which runs outside any
+ * request) minted tokens carrying whichever viewer's IP had arrived last. A
+ * token bound to one viewer, handed to the next, is a 403.
+ */
 export function runWithClientIp(ip, fn) {
-  fallbackIp = ip;
-  return ipStore.run({ ip }, fn);
+  return ipStore.run({ ip: ip || null }, fn);
 }
 
-/** Set the current viewer/client IP (outside a store this sets the fallback). */
+/** Set the viewer IP for the current context. No-op outside one. */
 export function setClientIp(ip) {
   const store = ipStore.getStore();
   if (store) store.ip = ip;
-  else fallbackIp = ip;
 }
 
-/** Get the current viewer/client IP from context (if any). */
+/** The current viewer's IP, or *fallback* when nobody is being served. */
 export function getClientIp(fallback = null) {
   const store = ipStore.getStore();
-  const ip = store ? store.ip : fallbackIp;
-  return ip || fallback;
+  return (store && store.ip) || fallback;
 }
 
 /** Extract viewer IP from request data and set it in the request context. */

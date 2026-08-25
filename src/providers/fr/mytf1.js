@@ -6,7 +6,7 @@ import { getRandomWindowsUA } from '../../utils/userAgent.js';
 import { getProgramsForProvider } from '../../utils/programsLoader.js';
 import { BaseProvider, safeProviderCall } from '../baseProvider.js';
 import { withDrmProcessedFiles } from '../drmMixin.js';
-import { loadAuthState, storeAuthState } from '../../utils/authCache.js';
+import { loadAuthState, storeAuthState, clearAuthState } from '../../utils/authCache.js';
 
 const logger = getLogger('providers.mytf1');
 
@@ -122,6 +122,28 @@ export class MyTF1Provider extends withDrmProcessedFiles(BaseProvider) {
   static validateTf1Delivery(data) {
     const delivery = data.delivery || {};
     return delivery.code === 200 && (delivery.country ?? 'US') !== 'US';
+  }
+
+  /** Whether a delivery response is TF1 refusing our token, rather than a
+   *  content or network problem. Only these are worth a fresh login. */
+  static tokenRejected(delivery) {
+    const code = delivery?.delivery?.code;
+    return code === 401 || code === 403;
+  }
+
+  /** Throw the cached token away and log in again, in this request's context.
+   *
+   * A cached token is shared by every viewer, so if one is refused it stays
+   * refused for everybody until it expires — hours of persistent 403s. Minting
+   * a new one here also gets it the current viewer's IP, which the warm-up
+   * deliberately cannot supply.
+   */
+  async _reauthenticate() {
+    logger.warning('⚠️ [MyTF1] Token refused — discarding it and logging in again');
+    clearAuthState(this.providerName);
+    this._authenticated = false;
+    this.authToken = null;
+    return this._authenticate();
   }
 
   /** Extract the DRM license URL and headers from a delivery response. */
@@ -454,7 +476,10 @@ export class MyTF1Provider extends withDrmProcessedFiles(BaseProvider) {
       }
 
       const videoId = `L_${channelName.toUpperCase()}`;
-      const mediainfo = await this._fetchMediainfo(videoId, MyTF1Provider.LIVE_MEDIAINFO_PARAMS);
+      let mediainfo = await this._fetchMediainfo(videoId, MyTF1Provider.LIVE_MEDIAINFO_PARAMS);
+      if (MyTF1Provider.tokenRejected(mediainfo) && await this._reauthenticate()) {
+        mediainfo = await this._fetchMediainfo(videoId, MyTF1Provider.LIVE_MEDIAINFO_PARAMS);
+      }
 
       if (!mediainfo) {
         logger.error('❌ [MyTF1] MyTF1 API error: No valid JSON from mediainfo (proxy and direct attempts failed)');
@@ -609,8 +634,12 @@ export class MyTF1Provider extends withDrmProcessedFiles(BaseProvider) {
 
       if (!authOk) return existing.length ? existing : null;
 
-      const deliveryData = await this._fetchEpisodeDelivery(actualId);
+      let deliveryData = await this._fetchEpisodeDelivery(actualId);
+      if (MyTF1Provider.tokenRejected(deliveryData) && await this._reauthenticate()) {
+        deliveryData = await this._fetchEpisodeDelivery(actualId);
+      }
       if (!deliveryData || (deliveryData.delivery?.code ?? 500) > 400) {
+        logger.error('❌ [MyTF1] Delivery error: %s', deliveryData?.delivery?.code ?? 'no response');
         return existing.length ? existing : null;
       }
 

@@ -124,6 +124,7 @@ credentials at all; DRM content needs the relevant account + proxy entries).
 | `PROXY_<NAME>` | Override a single proxy, e.g. `PROXY_FR_DEFAULT` | from credentials |
 | `MEDIAFLOW_PROXY_URL` / `MEDIAFLOW_API_PASSWORD` | MediaFlow proxy (overrides credentials section) | — |
 | `DRM_PROCESSING` | Enable nm3u8 + TorBox/Real-Debrid lookups | off |
+| `AUTH_WARM` | Pre-cache provider auth tokens in the background | on |
 | `LOG_LEVEL` | `debug`, `info`, `warning`, `error` | `info` |
 | `LOG_TO_FILE` / `LOG_FILE` | Optional file logging | off |
 | `ENABLE_DEBUG_ENDPOINTS` | Expose `/debug/*` endpoints | off |
@@ -198,6 +199,13 @@ and both are handled off the request path:
   round trips each, CBC's ROPC grant alone is ~2s); a viewer now pays none of it.
   Verified end to end: after the startup sweep, repeated stream resolutions across
   all four providers issue **zero** further auth requests.
+
+  The sweep runs with **no viewer in context**, deliberately: MyTF1's login
+  forwards whatever IP is in scope, so a warm-up that borrowed one viewer's IP
+  would mint a shared token the *next* viewer gets 403s with. A token TF1
+  refuses is discarded and re-minted once, in that request's own context, rather
+  than being served from cache until it expires. Set `AUTH_WARM=0` to switch
+  pre-caching off entirely and authenticate per request.
 - **Independent calls run together.** Within one stream resolution the
   pre-processed-file lookup, the login and the asset list are unrelated, as are
   the manifest read and the DRM upfront token; each pair now runs concurrently.
