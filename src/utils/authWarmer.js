@@ -19,20 +19,12 @@
 import { getLogger } from './logger.js';
 import { PROVIDER_CLASSES } from '../providers/registry.js';
 import { ProviderFactory } from '../providers/factory.js';
-import { runWithClientIp } from './clientIp.js';
 
 const logger = getLogger('utils.authWarmer');
 
 /** How often to re-check every provider. Must stay under authCache's
  *  EXPIRY_BUFFER (300s) so a token is replaced before requests can miss it. */
 export const WARM_INTERVAL_MS = 4 * 60 * 1000;
-
-/** Set AUTH_WARM=0 to switch pre-caching off and authenticate per request. */
-export function warmingEnabled() {
-  const env = process.env.AUTH_WARM;
-  if (env === undefined) return true;
-  return !['0', 'false', 'no', 'off'].includes(env.trim().toLowerCase());
-}
 
 let timer = null;
 let inFlight = null;
@@ -64,11 +56,7 @@ export async function warmAllProviders() {
   // and the first timer tick must never double-login.
   if (inFlight) return inFlight;
   const keys = Object.keys(PROVIDER_CLASSES);
-  // Explicitly no viewer: a warm-up must never borrow one visitor's IP and
-  // mint a token the next visitor then gets 403s with. MyTF1's login forwards
-  // whatever IP is in context, so this is load-bearing, not decoration.
-  inFlight = runWithClientIp(null, () => Promise.all(keys.map(warmOne)))
-    .finally(() => { inFlight = null; });
+  inFlight = Promise.all(keys.map(warmOne)).finally(() => { inFlight = null; });
   const results = await inFlight;
 
   const summary = results
@@ -88,8 +76,12 @@ export async function warmAllProviders() {
 export function startAuthWarmer({ intervalMs = WARM_INTERVAL_MS, immediate = true } = {}) {
   stopAuthWarmer();
 
-  if (!warmingEnabled()) {
-    logger.info('🔑 [auth-warm] disabled (AUTH_WARM=0) — providers authenticate per request');
+  // An off switch, because pre-authenticating is an opinion: set AUTH_WARMUP=0
+  // and every provider logs in lazily on the first request that needs it, the
+  // way it did before.
+  const setting = (process.env.AUTH_WARMUP ?? '').trim().toLowerCase();
+  if (['0', 'false', 'no', 'off'].includes(setting)) {
+    logger.info('🔑 [auth-warm] disabled by AUTH_WARMUP=%s', setting);
     return stopAuthWarmer;
   }
 

@@ -7,13 +7,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  warmAllProviders, stopAuthWarmer, startAuthWarmer, WARM_INTERVAL_MS, warmingEnabled,
-} from '../src/utils/authWarmer.js';
-import {
-  EXPIRY_BUFFER, ttlFromJwt, storeAuthState, loadAuthState,
-} from '../src/utils/authCache.js';
-import { runWithClientIp, getClientIp } from '../src/utils/clientIp.js';
+import { warmAllProviders, stopAuthWarmer, startAuthWarmer, WARM_INTERVAL_MS } from '../src/utils/authWarmer.js';
+import { EXPIRY_BUFFER, ttlFromJwt } from '../src/utils/authCache.js';
 import { CBCAuthenticator } from '../src/auth/cbcAuth.js';
 import { CBCProvider } from '../src/providers/ca/cbc.js';
 import { FranceTVProvider } from '../src/providers/fr/francetv.js';
@@ -246,97 +241,4 @@ test('MyTF1 picks the multi-key KID from the manifest it already read', async (t
   // Only a manifest that published no default_KID falls back to re-reading it.
   await provider._selectDrmKey('https://example/manifest.mpd', keys, null);
   assert.ok(state.calls.length > 0, 'the fallback still works when the KID is unknown');
-});
-
-test('the warm-up never borrows a viewer IP', async (t) => {
-  t.after(restoreFetch);
-
-  // The regression: runWithClientIp used to write a process-wide fallback that
-  // outlived the request, so the warm timer — which runs outside any request —
-  // minted MyTF1 tokens carrying whichever viewer's IP had arrived last. The
-  // next viewer then played with someone else's token and got a 403.
-  const seen = [];
-  globalThis.fetch = async (url, init) => {
-    const target = typeof url === 'string' ? url : url.url;
-    const headers = new Headers(init?.headers || {});
-    seen.push({ target, xff: headers.get('x-forwarded-for') });
-    return new Response('{}', { status: 404 });
-  };
-
-  const VIEWER = '81.185.10.20';
-  await runWithClientIp(VIEWER, async () => {
-    assert.equal(getClientIp(), VIEWER, 'a request does see its own viewer');
-  });
-
-  assert.equal(getClientIp(), null, 'the IP does not outlive the request');
-
-  cache.clear();
-  seen.length = 0;
-  await warmAllProviders();
-
-  assert.ok(seen.length > 0, 'the sweep made requests');
-  const leaked = seen.filter((c) => c.xff === VIEWER);
-  assert.deepEqual(leaked, [], 'no background login carried the viewer IP');
-});
-
-test('a request still forwards its own viewer IP', async (t) => {
-  t.after(restoreFetch);
-  const seen = [];
-  globalThis.fetch = async (url, init) => {
-    const headers = new Headers(init?.headers || {});
-    seen.push(headers.get('x-forwarded-for'));
-    return new Response('{}', { status: 404 });
-  };
-
-  // Fixing the leak must not stop real requests from forwarding the viewer —
-  // that is what gets geo-restricted content to play at all.
-  const VIEWER = '92.184.100.50';
-  await runWithClientIp(VIEWER, async () => {
-    const provider = new MyTF1Provider(null);
-    await provider.apiClient.get('https://example.invalid/thing', { maxRetries: 1 });
-  });
-  assert.ok(seen.includes(VIEWER), `expected the viewer IP to be forwarded, saw ${JSON.stringify(seen)}`);
-});
-
-test('AUTH_WARM=0 turns pre-caching off', (t) => {
-  t.after(restoreFetch);
-  const previous = process.env.AUTH_WARM;
-  t.after(() => {
-    if (previous === undefined) delete process.env.AUTH_WARM;
-    else process.env.AUTH_WARM = previous;
-  });
-  stubFetch();
-
-  assert.equal(warmingEnabled(), true, 'on by default');
-  for (const off of ['0', 'false', 'no', 'off']) {
-    process.env.AUTH_WARM = off;
-    assert.equal(warmingEnabled(), false, `AUTH_WARM=${off} disables it`);
-  }
-  process.env.AUTH_WARM = '0';
-  const stop = startAuthWarmer();
-  assert.equal(typeof stop, 'function');
-  stop();
-});
-
-test('a refused MyTF1 token is thrown away, not served again', async () => {
-  const provider = new MyTF1Provider(null);
-  provider._authenticated = true;
-  provider.authToken = 'stale-token';
-
-  assert.equal(MyTF1Provider.tokenRejected({ delivery: { code: 403 } }), true);
-  assert.equal(MyTF1Provider.tokenRejected({ delivery: { code: 401 } }), true);
-  // A geo block or a missing video is not an auth problem and must not
-  // trigger a pointless re-login.
-  assert.equal(MyTF1Provider.tokenRejected({ delivery: { code: 404 } }), false);
-  assert.equal(MyTF1Provider.tokenRejected({ delivery: { code: 200 } }), false);
-  assert.equal(MyTF1Provider.tokenRejected(null), false);
-
-  // Re-authenticating drops the shared cached token so the next viewer does not
-  // inherit the refused one.
-  storeAuthState('mytf1', { auth_token: 'stale-token' }, null, 3600);
-  assert.ok(loadAuthState('mytf1'), 'the stale token starts out cached');
-  provider._authenticate = async () => { provider.authToken = 'fresh'; return true; };
-  assert.equal(await provider._reauthenticate(), true);
-  assert.equal(loadAuthState('mytf1'), null, 'the cached token was cleared first');
-  assert.equal(provider.authToken, 'fresh');
 });

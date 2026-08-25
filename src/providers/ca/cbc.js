@@ -5,6 +5,7 @@ import { cache } from '../../utils/cache.js';
 import { CacheKeys, CacheTTL } from '../../utils/cacheKeys.js';
 import { getClientIp } from '../../utils/clientIp.js';
 import { getProgramsForProvider } from '../../utils/programsLoader.js';
+import { ttlForStreams } from '../../utils/signedUrl.js';
 
 const logger = getLogger('providers.cbc');
 
@@ -488,7 +489,17 @@ export class CBCProvider extends BaseProvider {
 
       const streamInfo = await this._getStreamFromCbcApi(mediaId);
       if (streamInfo) {
-        cache.set(cacheKey, streamInfo, CacheTTL.STREAM);
+        // CBC signs the master playlist with an Akamai token good for about
+        // two minutes (`hdnea=st=…~exp=…`). Caching it for the full stream TTL
+        // handed every later viewer a link that answers 403 — and kept doing so
+        // for half an hour. Never outlive the signature.
+        const ttl = ttlForStreams(streamInfo, CacheTTL.STREAM);
+        if (ttl > 0) {
+          cache.set(cacheKey, streamInfo, ttl);
+          logger.debug('🔍 [CBC] Cached stream for %ds (signature-limited)', ttl);
+        } else {
+          logger.debug('🔍 [CBC] Stream signature too short to cache');
+        }
         return streamInfo;
       }
 
