@@ -36,7 +36,7 @@ export function urlExpirySeconds(url) {
  *                                  moment still has time to be opened
  * @returns {number} 0 when the URL is already dead — do not cache it at all
  */
-export function ttlForSignedUrl(url, fallbackSeconds, safetySeconds = 15) {
+export function ttlForSignedUrl(url, fallbackSeconds, safetySeconds = 115) {
   const expiry = urlExpirySeconds(url);
   if (expiry === null) return fallbackSeconds;
   const remaining = Math.floor(expiry - Date.now() / 1000 - safetySeconds);
