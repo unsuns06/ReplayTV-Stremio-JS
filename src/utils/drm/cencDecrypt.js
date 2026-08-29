@@ -7,11 +7,14 @@
  * fell steadily behind the audio, which is one fragment per segment and so
  * came through intact.
  *
- * Only `mdat` bytes are rewritten. `senc`/`saiz`/`saio` are left where they
- * are: the init MediaFlow serves has already dropped the `sinf` protection
- * scheme, so with no scheme and no `tenc` key a demuxer never consults them,
- * and leaving them means no box needs resizing and no `trun` data offset needs
- * fixing up.
+ * Only `mdat` bytes are rewritten, and each fragment's `senc`/`saiz`/`saio` is
+ * then renamed to `free`. Renaming rather than removing keeps every box the
+ * size it was, so nothing needs resizing and no `trun` data offset needs fixing
+ * up — but the CENC signalling still has to go. ffmpeg ignores it once the
+ * sample entry is a plain `avc1`, which is why VLC and mpv played these
+ * segments happily; ExoPlayer keys off the boxes themselves, looks up the
+ * `tenc` that MediaFlow already stripped from the init, and dies in
+ * `FragmentedMp4Extractor.parseTraf` with an NPE reported as "Source error".
  */
 import crypto from 'node:crypto';
 
@@ -155,6 +158,12 @@ export function decryptCencSegment(segment, keyHex) {
           offset += size;
           i += 1;
         }
+      }
+      // The samples are in the clear now, so the boxes that describe how they
+      // were encrypted have to stop saying so. Same length, so every offset
+      // downstream still lands where `trun` says it does.
+      for (const type of ['senc', 'saiz', 'saio']) {
+        for (const stale of children(buf, traf, type)) buf.write('free', stale.start + 4, 'latin1');
       }
       fragments += 1;
     }

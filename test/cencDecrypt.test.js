@@ -106,3 +106,19 @@ test('leaves an unencrypted segment alone rather than corrupting it', () => {
 test('rejects a key that is not 16 bytes', () => {
   assert.throws(() => decryptCencSegment(Buffer.alloc(0), 'aabb'), /16 bytes/);
 });
+
+test('strips the CENC signalling ExoPlayer trips over, without moving anything', () => {
+  const key = Buffer.from(KEY, 'hex');
+  const iv = Buffer.alloc(8, 7);
+  const { segment } = buildFragment(
+    [{ plain: crypto.randomBytes(64), iv, subsamples: [{ clear: 16, encrypted: 48 }] }],
+    key,
+  );
+  const out = decryptCencSegment(segment, KEY);
+
+  // Renamed in place: the player must not find a `senc` describing samples that
+  // are already in the clear, and every offset has to stay where `trun` says.
+  assert.equal(out.includes(Buffer.from('senc', 'latin1')), false);
+  assert.equal(out.length, segment.length);
+  assert.equal(out.includes(Buffer.from('free', 'latin1')), true);
+});
