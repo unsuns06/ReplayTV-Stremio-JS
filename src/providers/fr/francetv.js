@@ -6,6 +6,7 @@ import { CacheKeys, CacheTTL } from '../../utils/cacheKeys.js';
 import { getProgramsForProvider } from '../../utils/programsLoader.js';
 import { API_FIELDS, DEFAULT_RATING } from '../../utils/showMeta.js';
 import { BaseProvider, safeProviderCall } from '../baseProvider.js';
+import { buildFtvManifestUrl } from '../../routers/ftvGeo.js';
 
 const logger = getLogger('providers.francetv');
 
@@ -297,8 +298,10 @@ export class FranceTVProvider extends BaseProvider {
         return null;
       }
 
-      const finalUrl = tokenData.url;
-      const manifestType = this._detectManifestType(finalUrl);
+      const manifestType = this._detectManifestType(tokenData.url);
+      // The signed URL is only playable from France, so hand the player this
+      // addon's copy instead and let the proxy do the travelling.
+      const finalUrl = buildFtvManifestUrl(getBaseUrl(this.req), tokenData.url);
       const formatLabel = manifestType === 'hls' ? 'HLS' : 'MPD';
       const streamTitle = currentProgramTitle
         ? `[${formatLabel}] ${currentProgramTitle}`
@@ -415,7 +418,12 @@ export class FranceTVProvider extends BaseProvider {
         logger.error('❌ [FranceTV] Failed to get stream URL');
         return null;
       }
-      return [{ url: tokenData.url, manifest_type: 'hls' }];
+      // Replays are DASH (`.../manifest.mpd`, `format: dash` in the k7 payload);
+      // calling them HLS was only ever survivable because players sniff.
+      return [{
+        url: buildFtvManifestUrl(getBaseUrl(this.req), tokenData.url),
+        manifest_type: this._detectManifestType(tokenData.url),
+      }];
     });
   }
 }
