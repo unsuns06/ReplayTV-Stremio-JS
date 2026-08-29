@@ -36,7 +36,7 @@ test('master playlist drops the key lines the proxy chokes on', () => {
   assert.ok(!out.includes('data:text/plain'));
 });
 
-test('master routes video and audio back through this addon, subtitles direct', () => {
+test('master routes video and audio through this addon, subtitles through MediaFlow', () => {
   const lines = rewritePlaylist(MASTER, MASTER_URL, CTX).split('\n');
   const video = lines[lines.length - 1];
   assert.ok(video.startsWith('https://addon.example/hls-cenc/playlist.m3u8?'));
@@ -47,9 +47,13 @@ test('master routes video and audio back through this addon, subtitles direct', 
   assert.ok(audio.includes('/hls-cenc/playlist.m3u8?'));
   assert.ok(audio.includes('mime=audio%2Fmp4'));
 
-  // WebVTT is not encrypted; a segment decryptor would only corrupt it.
+  // WebVTT is not encrypted, so it skips the decryptor — but it still has to
+  // leave via MediaFlow, or the player fetches it from the viewer's own address
+  // and Disney's US-only CDN answers 403.
   const subs = lines.find((l) => l.includes('TYPE=SUBTITLES'));
-  assert.ok(subs.includes('URI="https://vod.dssott.com/ps01/show/r/subs.m3u8"'));
+  assert.ok(subs.includes('URI="https://mf.example/proxy/hls/manifest.m3u8?'));
+  assert.ok(subs.includes(encodeURIComponent('https://vod.dssott.com/ps01/show/r/subs.m3u8')));
+  assert.ok(!subs.includes('/hls-cenc/'));
 });
 
 test('media playlist sends every segment to the decrypting endpoint', () => {

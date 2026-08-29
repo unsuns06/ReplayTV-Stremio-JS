@@ -23,6 +23,7 @@ import { getBaseUrl } from '../utils/baseUrl.js';
 import { loadCredentials } from '../utils/credentials.js';
 import { getRandomWindowsUA } from '../utils/userAgent.js';
 import { decryptCencSegment } from '../utils/drm/cencDecrypt.js';
+import { buildMediaflowUrl } from '../utils/mediaflow.js';
 
 export const router = express.Router();
 const logger = getLogger('routers.hlsCenc');
@@ -69,17 +70,33 @@ function initUrl(mf, init, mime, keys) {
 const segmentUrl = (base, segment, keys) => `${base.replace(/\/+$/, '')}${CENC_SEGMENT_PATH}?${
   new URLSearchParams({ u: segment, key: keys.key })}`;
 
-/** Point an audio rendition at its own rewritten playlist; leave the rest alone.
+/** Subtitles through MediaFlow untouched, audio through the decryptor.
  *
- * Only the audio and video renditions are encrypted — the WebVTT ones are in
- * the clear and would be destroyed by routing them through a segment decryptor.
+ * WebVTT is in the clear, so a segment decryptor would only corrupt it — but
+ * leaving the rendition pointing at Disney's CDN made it the one asset the
+ * player fetched on its own, from wherever the viewer happens to be. That CDN
+ * answers only US addresses, so everyone outside the US got a silent 403 and no
+ * subtitle track while the video (proxied) played fine. MediaFlow's plain HLS
+ * proxy is the addon's US egress and is enough here precisely because there is
+ * no CENC in the way.
  */
+function subtitleUrl(mf, url) {
+  if (!mf.url) return url;
+  return buildMediaflowUrl({
+    baseUrl: mf.url,
+    password: mf.password,
+    destinationUrl: url,
+    endpoint: '/proxy/hls/manifest.m3u8',
+    requestHeaders: { referer: 'https://abc.com' },
+  });
+}
+
 function rewriteMediaTag(line, absolute, ctx) {
   const uri = line.match(/URI="([^"]+)"/);
   if (!uri) return line;
   const target = /TYPE=AUDIO/.test(line)
     ? buildCencPlaylistUrl(ctx.base, absolute(uri[1]), ctx.keys, 'audio/mp4')
-    : absolute(uri[1]);
+    : subtitleUrl(ctx.mf, absolute(uri[1]));
   return line.replace(/URI="[^"]+"/, `URI="${target}"`);
 }
 
