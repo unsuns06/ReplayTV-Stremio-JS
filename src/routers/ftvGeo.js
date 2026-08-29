@@ -52,19 +52,41 @@ function allowedTarget(u) {
   return target.protocol === 'https:' && ALLOWED_HOSTS.test(target.hostname) ? target : null;
 }
 
-/** A manifest is XML or M3U8; base64 can only ever be the alphabet, never `<`. */
-const isText = (buf) => /^[<#]/.test(buf.subarray(0, 64).toString('latin1').trimStart());
+/** Is this body base64, rather than the bytes themselves?
+ *
+ * Asked this way round on purpose. The obvious test — "does it look like XML"
+ * — decides correctly between a manifest and a base64 segment but calls raw
+ * MP4 base64 and mangles it, so it would break the day the proxy's REST API
+ * learns `binaryMediaTypes` and starts returning segments undecorated. Every
+ * byte of base64 is in its alphabet, and neither `<?xml` nor an MP4's leading
+ * `00 00 00 18` is, so this stays right whichever the proxy sends.
+ */
+const isBase64 = (buf) => buf.length > 0
+  && buf.subarray(0, 64).every((b) => B64_ALPHABET.has(b));
+const B64_ALPHABET = new Set(
+  [...'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\r\n']
+    .map((c) => c.charCodeAt(0)),
+);
+
+// What the proxy's REST API matches against its `binaryMediaTypes` to decide
+// whether a response may stay binary. It reads the *request's* Accept header
+// rather than the response's content type, and a wildcard does not count as a
+// match: send the default and every segment arrives base64, a third of it
+// padding. `video/mp4` is the type each France TV segment carries, audio
+// included; the wildcard tail keeps manifests and error bodies acceptable.
+const BINARY_ACCEPT = 'video/mp4,*/*;q=0.8';
 
 /** Fetch *url* from France, returning the real bytes. */
 async function fetchViaFrance(url) {
   const proxy = getProxyConfig().getProxy('fr_default');
   if (!proxy) throw new Error("proxy 'fr_default' is not configured");
   const response = await fetch(proxy + encodeURIComponent(url), {
+    headers: { Accept: BINARY_ACCEPT },
     signal: AbortSignal.timeout(25000),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const body = Buffer.from(await response.arrayBuffer());
-  return isText(body) ? body : Buffer.from(body.toString('latin1'), 'base64');
+  return isBase64(body) ? Buffer.from(body.toString('latin1'), 'base64') : body;
 }
 
 /** Point a manifest's segments at this addon. Exported for the tests.
