@@ -1,6 +1,6 @@
 {
   "name": "replaytv-stremio-js",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Catch-up TV & More for Stremio — French and Canadian live TV and replays (JavaScript port)",
   "type": "module",
   "main": "server.js",

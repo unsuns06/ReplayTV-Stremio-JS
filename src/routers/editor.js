@@ -18,6 +18,7 @@ import { getLogger } from '../utils/logger.js';
 import { getProgramsFilePath, reloadPrograms } from '../utils/programsLoader.js';
 import { STATIC_DIR } from '../utils/paths.js';
 import { withParams } from '../utils/apiClient.js';
+import { getProviderConfig } from '../config/providerConfig.js';
 
 const logger = getLogger('routers.editor');
 export const router = express.Router();
@@ -173,11 +174,29 @@ async function catalogueCbc() {
   return rows;
 }
 
+async function catalogueAbc() {
+  // One request returns every ABC show; `urltitle` is the slug abc.com's own
+  // URLs use, so it is what programs.json names.
+  const data = await get(
+    'https://api.contents.watchabc.go.com/vp2/ws/contents/3000/shows/001/001/-1/-1.json',
+    null,
+    { Accept: 'application/json', Referer: 'https://abc.com/', Origin: 'https://abc.com' },
+  );
+  const rows = {};
+  for (const show of data.show || []) {
+    if (show.urltitle) {
+      rows[show.urltitle] = { slug: show.urltitle, name: show.title || '', channel: 'ABC' };
+    }
+  }
+  return rows;
+}
+
 const CATALOGUES = {
   '6play': catalogue6play,
   mytf1: catalogueMytf1,
   francetv: catalogueFrancetv,
   cbc: catalogueCbc,
+  abc: catalogueAbc,
 };
 
 const catalogueCache = {};
@@ -265,6 +284,18 @@ const FORBIDDEN = { error: 'The programs editor is local-only' };
 router.get('/', (req, res) => {
   if (!isLocal(req)) return res.json({ message: 'Catch-up TV & More for Stremio API' });
   return res.sendFile(EDITOR_PAGE);
+});
+
+/** The providers the editor may add shows for, newest registry state.
+ *
+ * The page used to hard-code this list, so a newly registered provider was
+ * addable in programs.json but not pickable in the UI.
+ */
+router.get('/api/providers', (req, res) => {
+  if (!isLocal(req)) return res.status(403).json(FORBIDDEN);
+  const providers = Object.keys(CATALOGUES)
+    .map((key) => ({ key, name: (getProviderConfig(key) || {}).display_name || key }));
+  return res.json(providers);
 });
 
 router.get('/api/programs', (req, res) => {

@@ -8,7 +8,9 @@ import { PROVIDER_REGISTRY } from './config/providerConfig.js';
 import { getProgramsForProvider } from './utils/programsLoader.js';
 
 export const ADDON_ID = 'org.catchuptvandmore.stremio';
-export const ADDON_VERSION = '1.1.0';
+// Stremio caches an installed addon's manifest and only re-reads it when this
+// changes, so a new provider is invisible to existing installs until it moves.
+export const ADDON_VERSION = '1.2.0';
 export const ADDON_NAME = 'Catch-up TV & More';
 
 /** Build a catalog display name listing the provider's shows. */
@@ -47,7 +49,7 @@ export function getManifest() {
     id: ADDON_ID,
     version: ADDON_VERSION,
     name: ADDON_NAME,
-    description: 'French and Canadian live TV and TV show replays from '
+    description: 'Live TV and TV show replays from '
       + Object.values(PROVIDER_REGISTRY).map((cfg) => cfg.display_name).join(', '),
     logo: 'https://catch-up-tv-and-more.github.io/images/logo.png',
     background: 'https://catch-up-tv-and-more.github.io/images/background.jpg',

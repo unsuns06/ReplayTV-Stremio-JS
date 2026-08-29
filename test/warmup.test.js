@@ -14,6 +14,7 @@ import { CBCProvider } from '../src/providers/ca/cbc.js';
 import { FranceTVProvider } from '../src/providers/fr/francetv.js';
 import { MyTF1Provider } from '../src/providers/fr/mytf1.js';
 import { cache } from '../src/utils/cache.js';
+import { PROVIDER_CLASSES } from '../src/providers/registry.js';
 
 const realFetch = globalThis.fetch;
 const restoreFetch = () => { globalThis.fetch = realFetch; };
@@ -38,9 +39,11 @@ test('the warmer reports one result per provider and never throws', async (t) =>
   stubFetch();
   const results = await warmAllProviders();
 
-  assert.equal(results.length, 4);
+  // Derived from the registry, so registering a provider does not fail this.
+  const expected = Object.keys(PROVIDER_CLASSES).sort();
+  assert.equal(results.length, expected.length);
   const byKey = Object.fromEntries(results.map((r) => [r.key, r]));
-  assert.deepEqual(Object.keys(byKey).sort(), ['6play', 'cbc', 'francetv', 'mytf1']);
+  assert.deepEqual(Object.keys(byKey).sort(), expected);
   // FranceTV needs no credentials, so it must never be reported as a failure.
   assert.equal(byKey.francetv.state, 'no-auth');
   for (const r of results) {

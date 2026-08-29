@@ -8,6 +8,13 @@ import fs from 'node:fs';
 
 import { createApp } from '../src/app.js';
 import { getProgramsFilePath } from '../src/utils/programsLoader.js';
+import { PROVIDER_CLASSES } from '../src/providers/registry.js';
+
+// Derived from the registry rather than spelled out, so registering a
+// provider updates these expectations instead of breaking them.
+const PROVIDER_KEYS = Object.keys(PROVIDER_CLASSES);
+const ID_PREFIXES = [...new Set(Object.values(PROVIDER_CLASSES)
+  .map((cls) => `cutam:${cls.country}:`))].sort();
 
 let server;
 let base;
@@ -27,10 +34,11 @@ test('the manifest is generated from the provider registry', async () => {
   assert.equal(manifest.id, 'org.catchuptvandmore.stremio');
   assert.deepEqual(manifest.resources, ['catalog', 'meta', 'stream']);
   assert.deepEqual(manifest.types, ['channel', 'series']);
-  assert.deepEqual(manifest.idPrefixes, ['cutam:ca:', 'cutam:fr:']);
+  assert.deepEqual(manifest.idPrefixes, ID_PREFIXES);
 
   const ids = manifest.catalogs.map((c) => c.id);
-  assert.deepEqual(ids, ['fr-live', 'fr-francetv-replay', 'fr-mytf1-replay', 'fr-6play-replay', 'ca-cbc-dragons-den']);
+  assert.deepEqual(ids, ['fr-live',
+    ...PROVIDER_KEYS.map((k) => PROVIDER_CLASSES[k].catalogId)]);
   // Catalog names list the shows from programs.json
   assert.match(manifest.catalogs[1].name, /^France TV TV Shows: /);
 });
@@ -38,7 +46,7 @@ test('the manifest is generated from the provider registry', async () => {
 test('/health reports provider configuration and cache stats', async () => {
   const health = await (await get('/health')).json();
   assert.equal(health.status, 'healthy');
-  assert.deepEqual(Object.keys(health.providers), ['francetv', 'mytf1', '6play', 'cbc']);
+  assert.deepEqual(Object.keys(health.providers), PROVIDER_KEYS);
   for (const state of Object.values(health.providers)) {
     assert.ok(['configured', 'unconfigured'].includes(state));
   }

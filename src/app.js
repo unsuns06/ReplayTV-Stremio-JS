@@ -18,6 +18,7 @@ import { router as metaRouter } from './routers/meta.js';
 import { router as streamRouter } from './routers/stream.js';
 import { router as configureRouter } from './routers/configure.js';
 import { router as subtitlesRouter } from './routers/subtitles.js';
+import { router as hlsCencRouter } from './routers/hlsCenc.js';
 import { router as editorRouter } from './routers/editor.js';
 
 const logger = getLogger('app.main');
@@ -216,6 +217,7 @@ export function createApp() {
   app.use(streamRouter);
   app.use(configureRouter);
   app.use(subtitlesRouter);
+  app.use(hlsCencRouter);
   // Owns "/" — the programs.json editor locally, the API greeting elsewhere.
   app.use(editorRouter);
 

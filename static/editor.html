@@ -121,11 +121,7 @@ td:last-child { text-align: right; width: 1%; white-space: nowrap; }
     <div class="add-grid">
       <label>Provider
         <select id="provider">
-          <option value="">Choose…</option>
-          <option value="6play">6play</option>
-          <option value="mytf1">TF1+</option>
-          <option value="francetv">France TV</option>
-          <option value="cbc">CBC Gem</option>
+          <option value="">Loading…</option>
         </select>
       </label>
       <label>Filter
@@ -161,7 +157,9 @@ td:last-child { text-align: right; width: 1%; white-space: nowrap; }
 
 <script>
 const $ = id => document.getElementById(id);
-const PROVIDERS = {"6play": "6play", mytf1: "TF1+", francetv: "France TV", cbc: "CBC Gem"};
+// Filled from /api/providers, which reads the provider registry — hard-coding
+// it here meant every new provider needed this file edited too.
+let PROVIDERS = {};
 const CORE = ["provider", "slug", "name"];
 
 let shows = [];          // what will be written
@@ -196,6 +194,16 @@ function render() {
     render();
     markDirty();
   };
+}
+
+async function loadProviders() {
+  const list = await (await fetch("/api/providers")).json();
+  PROVIDERS = Object.fromEntries(list.map(p => [p.key, p.name]));
+  $("provider").innerHTML =
+    '<option value="">Choose…</option>'
+    + list.map(p => `<option value="${p.key}"></option>`).join("");
+  // Set the labels as text, never as markup: they come from the registry.
+  list.forEach((p, i) => { $("provider").options[i + 1].textContent = p.name; });
 }
 
 async function load() {
@@ -291,7 +299,7 @@ $("reload").onclick = () => {
 
 addEventListener("beforeunload", e => { if (dirty) e.preventDefault(); });
 
-load();
+loadProviders().then(load);
 </script>
 </body>
 </html>

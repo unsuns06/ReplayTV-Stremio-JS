@@ -2,6 +2,7 @@ import { FranceTVProvider } from './fr/francetv.js';
 import { MyTF1Provider } from './fr/mytf1.js';
 import { SixPlayProvider } from './fr/sixplay.js';
 import { CBCProvider } from './ca/cbc.js';
+import { ABCProvider } from './us/abc.js';
 
 /** Map provider keys to their implementation classes. */
 export const PROVIDER_CLASSES = {
@@ -9,6 +10,7 @@ export const PROVIDER_CLASSES = {
   mytf1: MyTF1Provider,
   '6play': SixPlayProvider,
   cbc: CBCProvider,
+  abc: ABCProvider,
 };
 
 /** The provider class for a given key, or undefined. */
