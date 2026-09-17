@@ -40,8 +40,6 @@ export class FranceTVMetadataProcessor {
       vignette_16x9: 'w:1024', // 16:9 poster
       background_16x9: 'w:2500', // 16:9 fanart
       vignette_3x4: 'w:1024', // 3:4 poster
-      vignette_2x3: 'w:2000', // 2:3 poster, the only size published
-      lt_16x9: 'w:1280', // 16:9 with the title baked in
       logo: 'w:400', // Logo
       banner: 'w:1200', // Banner
       clearart: 'w:800', // Clear art
@@ -60,14 +58,16 @@ export class FranceTVMetadataProcessor {
         const imageType = image.type;
         const sizeKey = this.imageTypes[imageType];
         if (sizeKey && image.urls[sizeKey]) {
-          allImages[imageType] = imageExtractor.resolveUrl(image.urls[sizeKey]);
+          const relativeUrl = image.urls[sizeKey];
+          allImages[imageType] = relativeUrl.startsWith('/')
+            ? `https://www.france.tv${relativeUrl}`
+            : relativeUrl;
         }
       }
     }
 
-    // Poster/thumbnail (priority: vignette_2x3 > vignette_3x4 > carre > vignette_16x9)
-    // 2:3 is Stremio's own poster shape, so it needs no cropping.
-    for (const key of ['vignette_2x3', 'vignette_3x4', 'carre', 'vignette_16x9']) {
+    // Poster/thumbnail (priority: vignette_3x4 > carre > vignette_16x9)
+    for (const key of ['vignette_3x4', 'carre', 'vignette_16x9']) {
       if (allImages[key]) {
         itemData.poster = allImages[key];
         itemData.landscape = allImages[key];
@@ -75,9 +75,8 @@ export class FranceTVMetadataProcessor {
       }
     }
 
-    // Fanart/background (priority: background_16x9 > vignette_16x9 > lt_16x9)
-    // lt_16x9 repeats the title the logo already shows, so it's last resort.
-    for (const key of ['background_16x9', 'vignette_16x9', 'lt_16x9']) {
+    // Fanart/background (priority: background_16x9 > vignette_16x9)
+    for (const key of ['background_16x9', 'vignette_16x9']) {
       if (allImages[key]) {
         itemData.fanart = allImages[key];
         itemData.background = allImages[key];
@@ -202,8 +201,7 @@ export const metadataProcessor = new FranceTVMetadataProcessor();
 
 /** Centralises FranceTV API image URL extraction. */
 export class FranceTVImageExtractor {
-  // The API's relative /image/... paths 404 on www.france.tv since France TV
-  // moved the site to signed medias.france.tv URLs; the API host still serves them.
+  // www.france.tv no longer serves the API's relative /image/... paths.
   static BASE_URL = 'https://api-front.yatta.francetv.fr';
 
   // Maps pattern type substring → preferred width keys tried in order

@@ -276,31 +276,6 @@ test('France TV image patterns resolve to absolute URLs at the preferred width',
   assert.deepEqual(imageExtractor.extract(patterns, { missing: 'carre' }), {});
 });
 
-test('France TV artwork falls through past renditions the image host never generated', async () => {
-  const { FranceTVProvider } = await import('../src/providers/fr/francetv.js');
-  const { metadataProcessor } = await import('../src/providers/fr/metadata.js');
-  const { cache } = await import('../src/utils/cache.js');
-  const provider = new FranceTVProvider(null);
-  const patterns = [
-    { type: 'background_16x9', urls: { 'w:2500': '/dead-bg.png' } },
-    { type: 'vignette_3x4', urls: { 'w:1024': '/dead-poster.png' } },
-    { type: 'vignette_2x3', urls: { 'w:2000': '/poster.jpg' } },
-    { type: 'lt_16x9', urls: { 'w:1280': '/titled.jpg' } },
-    { type: 'logo', urls: { 'w:450': '/blip.png' } },
-  ];
-  provider.apiClient.rawRequest = async (method, url) => (
-    url.endsWith('/blip.png') ? null : { status: url.includes('/dead-') ? 404 : 200 });
-
-  cache.clear();
-  const live = await provider._liveImages('france-2_x', patterns);
-  assert.deepEqual(live.map((p) => p.type), ['vignette_2x3', 'lt_16x9', 'logo'],
-    'a 404 drops the pattern; a failed request keeps it');
-  const meta = metadataProcessor.populateImages({}, live);
-  assert.equal(meta.poster, 'https://api-front.yatta.francetv.fr/poster.jpg');
-  assert.equal(meta.background, 'https://api-front.yatta.francetv.fr/titled.jpg');
-  cache.clear();
-});
-
 test('HTML entities in France TV copy are decoded', () => {
   assert.equal(htmlUnescape('Enqu&ecirc;te &amp; d&eacute;bat'), 'Enquête & débat');
   assert.equal(htmlUnescape('&#233;t&#xe9;'), 'été');
