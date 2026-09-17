@@ -114,7 +114,7 @@ export class FranceTVProvider extends BaseProvider {
       const data = apiId ? await this._taxonomy(apiId) : null;
       if (!data) return null;
 
-      const images = data.media_image?.patterns || [];
+      const images = await this._liveImages(apiId, data.media_image?.patterns || []);
       const extracted = imageExtractor.extract(images, { logo: 'logo' });
       const ageMin = data.age_min;
       return {
@@ -129,6 +129,26 @@ export class FranceTVProvider extends BaseProvider {
           .map((t) => t.taxonomy.label),
         rating: Number.isInteger(ageMin) && ageMin > 3 ? `-${ageMin}` : DEFAULT_RATING,
       };
+    });
+  }
+
+  /** The image patterns the image host actually serves, cached.
+   *
+   * The API still lists renditions that were never generated — Complément
+   * d'enquête's PNG artwork 404s at every size — so those are dropped and the
+   * type priorities fall through to the next one. A rendition dies at all
+   * sizes together, so one probe per pattern is enough. Only a definite 404
+   * drops one: a network blip must not cache a show without artwork.
+   */
+  async _liveImages(apiId, patterns) {
+    return this._cachedPayload(`live_images:${apiId}`, async () => {
+      const dead = await Promise.all(patterns.map(async (p) => {
+        const url = imageExtractor.resolveUrl(Object.values(p.urls || {})[0]);
+        if (!url) return true;
+        const resp = await this.apiClient.rawRequest('HEAD', url, { timeout: 10 });
+        return resp?.status === 404;
+      }));
+      return patterns.filter((_, i) => !dead[i]);
     });
   }
 
