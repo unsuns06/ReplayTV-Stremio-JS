@@ -79,6 +79,26 @@ export class FranceTVProvider extends BaseProvider {
     ));
   }
 
+  /** Show and per-video (by si_id) images from the mobile API, cached.
+   *
+   * The yatta APIs' relative image paths aren't all served any more (newer
+   * uploads 404); the mobile API's generic/program endpoints list the same
+   * patterns as signed medias.france.tv URLs, clips included.
+   */
+  async _appImages(apiId) {
+    return this._cachedPayload(`app_images:${apiId}`, async () => {
+      const url = `${this.apiMobile}/generic/program/${apiId}`;
+      const [show, contents] = await Promise.all([
+        this.apiClient.get(url, { params: { platform: 'apps' } }),
+        this.apiClient.get(`${url}/contents`, { params: { platform: 'apps', size: 20, page: 0 } }),
+      ]);
+      if (!show?.images) return null;
+      const episodes = {};
+      for (const i of contents?.items || []) if (i.si_id) episodes[i.si_id] = i.images;
+      return { show: show.images, episodes };
+    });
+  }
+
   /** France TV addresses a show as `<channel>_<slug>`.
    *
    * The channels are probed in order, which costs nothing for a France 2 show
@@ -114,11 +134,7 @@ export class FranceTVProvider extends BaseProvider {
       const data = apiId ? await this._taxonomy(apiId) : null;
       if (!data) return null;
 
-      // The taxonomy's relative image paths aren't all served any more; the
-      // app endpoint lists the same patterns as signed medias.france.tv URLs.
-      const images = await this._cachedPayload(`program_images:${apiId}`, async () => (
-        await this.apiClient.get(`${this.apiMobile}/apps/program/${apiId}`, { params: { platform: 'apps' } })
-      )?.item?.images) || data.media_image?.patterns || [];
+      const images = (await this._appImages(apiId))?.show || data.media_image?.patterns || [];
       const extracted = imageExtractor.extract(images, { logo: 'logo' });
       const ageMin = data.age_min;
       return {
@@ -325,6 +341,11 @@ export class FranceTVProvider extends BaseProvider {
       return null;
     }
     const filtered = data.result.filter((v) => ['integrale', 'extrait'].includes(v.type));
+    const appEpisodes = (await this._appImages(apiShowId))?.episodes || {};
+    for (const v of filtered) {
+      const siId = (v.content_has_medias || []).find((m) => m.type === 'main')?.media?.si_id;
+      v.app_images = appEpisodes[siId];
+    }
     return filtered.length ? filtered : null;
   }
 
@@ -340,7 +361,8 @@ export class FranceTVProvider extends BaseProvider {
       const description = rawDescription ? htmlUnescape(rawDescription) : '';
 
       // Collect all image patterns from both API sources, then extract in one pass
-      const patterns = [];
+      // Signed app images first: extract() keeps the first match per type.
+      const patterns = [...(episodeData.app_images || [])];
       for (const m of episodeData.content_has_medias || []) {
         if (m.type === 'image') patterns.push(...(m.media?.patterns || []));
       }
