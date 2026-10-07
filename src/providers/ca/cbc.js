@@ -176,11 +176,12 @@ export class CBCProvider extends BaseProvider {
         candidates[field] = keys.map((k) => (images[k] || {}).url);
       }
       // No poster is published: derive it from the background URL, falling back
-      // to the page's og:image. Skipped entirely when programs.json pins one.
+      // to the logo (og:image is only Gem's generic social card). Skipped
+      // entirely when programs.json pins one.
       if (!showInfo.poster) {
         candidates.poster = [
           await this._firstExisting(this._posterCandidates(data || {})),
-          ((data || {}).htmlMeta || {})['og:image'],
+          (images.logo || {}).url,
         ];
       }
       // Neither a year nor a rating is published at show level; both live on
@@ -226,21 +227,24 @@ export class CBCProvider extends BaseProvider {
    * `show/perso/<stem>_ott_poster_v01.jpg` (schitts-creek). Together they cover
    * 12 of 16 shows sampled; the caller HEAD-checks them in order.
    *
-   * ponytail: v01 only. The poster's version is independent of the
-   * background's, so chasing it would mean a request per guess — og:image
-   * covers those shows instead.
+   * The poster's version is independent of the background's (marketplace:
+   * background v08, poster v03), so v05 down to v01 are all tried, newest first.
+   * ponytail: up to 10 serial HEADs for a show with no poster, cached; widen
+   * the range if a show turns up past v05.
    */
   _posterCandidates(data) {
     const background = ((data.images || {}).background || {}).url;
     if (!background) return [];
     const seasons = CBCProvider.seasonNumbers(data);
     const candidates = [];
-    if (seasons.length) {
-      candidates.push(background
-        .replace('/show/', '/season/')
-        .replace(/_ott_background_v\d+/, `_s${Math.max(...seasons)}_ott_poster_v01`));
+    for (let v = 5; v >= 1; v -= 1) {
+      if (seasons.length) {
+        candidates.push(background
+          .replace('/show/', '/season/')
+          .replace(/_ott_background_v\d+/, `_s${Math.max(...seasons)}_ott_poster_v0${v}`));
+      }
+      candidates.push(background.replace(/_ott_background_v\d+/, `_ott_poster_v0${v}`));
     }
-    candidates.push(background.replace(/_ott_background_v\d+/, '_ott_poster_v01'));
     return candidates;
   }
 
