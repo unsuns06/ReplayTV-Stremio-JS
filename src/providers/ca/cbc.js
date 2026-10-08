@@ -176,12 +176,12 @@ export class CBCProvider extends BaseProvider {
         candidates[field] = keys.map((k) => (images[k] || {}).url);
       }
       // No poster is published: derive it from the background URL, falling back
-      // to the logo (og:image is only Gem's generic social card). Skipped
+      // to the background (og:image is only Gem's generic social card). Skipped
       // entirely when programs.json pins one.
       if (!showInfo.poster) {
         candidates.poster = [
           await this._firstExisting(this._posterCandidates(data || {})),
-          (images.logo || {}).url,
+          (images.background || {}).url,
         ];
       }
       // Neither a year nor a rating is published at show level; both live on
