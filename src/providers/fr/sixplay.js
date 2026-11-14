@@ -1008,19 +1008,34 @@ export class SixPlayProvider extends withDrmProcessedFiles(BaseProvider) {
     }
   }
 
+  /**
+   * The API caps every page at 100 (whatever `limit` says) and orders by
+   * publication_date, which reruns bump. So one page holds re-published old
+   * docs and misses recent first broadcasts. Fetch every page, then drop
+   * reruns (same title) and keep the most recent publication of each.
+   */
   async _fetchRawVideos(programId) {
     return safeProviderCall(this, '_fetchRawVideos', null, async () => {
-      const url = 'https://android.middleware.6play.fr/6play/v2/platforms/'
+      const base = 'https://android.middleware.6play.fr/6play/v2/platforms/'
         + `m6group_androidmob/services/6play/programs/${programId}`
-        + '/videos?csa=6&with=clips,freemiumpacks&type=vi&limit=999&offset=0';
-      const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' };
-      const response = await this.apiClient.rawRequest('GET', url, { headers: this._mergeIpHeaders(headers) });
-      if (response && response.status === 200) {
-        const videos = await response.json();
-        return videos && videos.length ? videos : null;
+        + '/videos?csa=6&with=clips,freemiumpacks&type=vi&limit=100';
+      const headers = this._mergeIpHeaders({ 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' });
+      const videos = [];
+      // ponytail: 20-page cap (2000 videos) guards against runaway loops
+      for (let offset = 0; offset < 2000; offset += 100) {
+        const response = await this.apiClient.rawRequest('GET', `${base}&offset=${offset}`, { headers });
+        if (!response || response.status !== 200) {
+          logger.error('❌ [SixPlay] Failed to get episodes (offset %d): %s', offset, response ? response.status : 'no response');
+          break;
+        }
+        const page = await response.json();
+        if (!Array.isArray(page) || !page.length) break;
+        videos.push(...page);
+        if (page.length < 100) break;
       }
-      logger.error('❌ [SixPlay] Failed to get episodes: %s', response ? response.status : 'no response');
-      return null;
+      const seen = new Set();
+      const unique = videos.filter((v) => !seen.has(v.title) && seen.add(v.title));
+      return unique.length ? unique : null;
     });
   }
 
