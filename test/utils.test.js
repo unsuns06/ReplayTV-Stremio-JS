@@ -281,3 +281,18 @@ test('HTML entities in France TV copy are decoded', () => {
   assert.equal(htmlUnescape('&#233;t&#xe9;'), 'été');
   assert.equal(htmlUnescape('a &notanentity; b'), 'a &notanentity; b');
 });
+
+test('episode numbers come from the air date, not the list position', async () => {
+  const { BaseProvider } = await import('../src/providers/baseProvider.js');
+  const sort = (eps) => BaseProvider.prototype._sortEpisodesChronologically.call({}, eps);
+  const ep = (id, released) => ({ id, released });
+  const before = sort([ep('a', '2026-10-08T10:00:00Z'), ep('b', '2026-10-09T10:00:00Z')]);
+  // The window slides: 'a' ages out, two new ones arrive (one the same day as 'b').
+  const after = sort([ep('c', '2026-10-09T18:00:00Z'), ep('b', '2026-10-09T10:00:00Z'), ep('d', '2026-10-10T10:00:00Z')]);
+  const num = (list, id) => { const e = list.find((x) => x.id === id); return `S${e.season}E${e.episode}`; };
+  assert.equal(num(before, 'b'), 'S2026E100900');
+  assert.equal(num(after, 'b'), num(before, 'b'), 'a video keeps its number when the list changes');
+  assert.equal(num(after, 'c'), 'S2026E100901');
+  assert.equal(num(after, 'd'), 'S2026E101000');
+  assert.equal(sort([{ id: 'x' }])[0].season, 0, 'undated episodes go to season 0');
+});

@@ -268,16 +268,31 @@ export class BaseProvider {
     return { ...mergeIpHeaders(headers), ...(extra || {}) };
   }
 
-  /** Sort episodes by date (oldest first) and re-number them. */
+  /**
+   * Sort episodes by date (oldest first) and number them from their air date:
+   * season = year, episode = MMDD*100 + rank within the day (Oct 9 → S2026E100900).
+   *
+   * Numbering by list position broke capped daily shows: when the window
+   * slides, every video shifts down one number, and clients that key watch
+   * state on season/episode (Nuvio) mark new episodes as already watched.
+   * Undated episodes fall back to position numbering in season 0.
+   */
   _sortEpisodesChronologically(episodes) {
-    episodes.sort((a, b) => {
-      const ka = a.released || a.broadcast_date || '';
-      const kb = b.released || b.broadcast_date || '';
-      return ka < kb ? -1 : ka > kb ? 1 : 0;
-    });
+    const key = (e) => e.released || e.broadcast_date || '';
+    episodes.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+    const perDay = {};
     episodes.forEach((ep, i) => {
-      ep.episode = i + 1;
-      ep.episode_number = i + 1;
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(key(ep));
+      if (m) {
+        // ponytail: rank caps at 99/day before colliding with the next day
+        perDay[m[0]] = (perDay[m[0]] ?? -1) + 1;
+        ep.season = Number(m[1]);
+        ep.episode = Number(m[2] + m[3]) * 100 + perDay[m[0]];
+      } else {
+        ep.season = 0;
+        ep.episode = i + 1;
+      }
+      ep.episode_number = ep.episode;
     });
     return episodes;
   }
